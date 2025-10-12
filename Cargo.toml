@@ -1,13 +1,13 @@
 [package]
 
 name = "nntp"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2024"
-authors = ["Matt McCoy <mattnenterprise@yahoo.com>"]
-repository = "https://github.com/mattnenterprise/rust-nntp"
+authors = ["Rafael Passos <auyer@rcpassos.me>"]
+repository = "https://github.com/auyer/rust-nntp"
 description = "NNTP client for Rust"
+license = "GPL-V3"
 readme = "README.md"
-license = "MIT OR Apache-2.0"
 
 [lib]
 name = "nntp"
