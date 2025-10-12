@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::io::{Error, Read, Result, Write};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
@@ -54,6 +55,12 @@ pub struct NewsGroup {
     pub high: isize,
     pub low: isize,
     pub status: String,
+}
+
+impl fmt::Display for NewsGroup {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} ({})", self.name, self.high - self.low)
+    }
 }
 
 impl NewsGroup {
