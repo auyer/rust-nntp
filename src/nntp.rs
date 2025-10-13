@@ -12,6 +12,7 @@ pub struct NNTPStream {
     stream: TcpStream,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Article {
     pub headers: HashMap<String, String>,
     pub body: Vec<String>,
@@ -50,6 +51,7 @@ impl Article {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewsGroup {
     pub name: String,
     pub high: isize,
