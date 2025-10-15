@@ -132,6 +132,12 @@ impl NNTPStream {
         self.retrieve_article(&format!("ARTICLE {}\r\n", article_number))
     }
 
+    /// The article indicated by the article number in the currently selected newsgroup is selected.
+    /// returns the raw email line by line
+    pub fn raw_article_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
+        self.retrieve_raw_article(&format!("ARTICLE {}\r\n", article_number))
+    }
+
     fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
         match self.stream.write_fmt(format_args!("{}", article_command)) {
             Ok(_) => (),
@@ -145,6 +151,23 @@ impl NNTPStream {
 
         match self.read_multiline_response() {
             Ok(lines) => Ok(Article::new_article(lines)),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn retrieve_raw_article(&mut self, article_command: &str) -> Result<Vec<String>> {
+        match self.stream.write_fmt(format_args!("{}", article_command)) {
+            Ok(_) => (),
+            Err(_) => return Err(Error::other("Failed to retreive atricle")),
+        }
+
+        match self.read_response(220) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+
+        match self.read_multiline_response() {
+            Ok(lines) => Ok(lines),
             Err(e) => Err(e),
         }
     }
