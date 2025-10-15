@@ -56,6 +56,7 @@ pub struct NewsGroup {
     pub name: String,
     pub high: isize,
     pub low: isize,
+    pub number: isize,
     pub status: String,
 }
 
@@ -66,15 +67,35 @@ impl fmt::Display for NewsGroup {
 }
 
 impl NewsGroup {
-    pub fn new_news_group(group: &str) -> NewsGroup {
+    pub fn from_list_response(group: &str) -> NewsGroup {
+        // group high low status
+        let chars_to_trim: &[char] = &['\r', '\n', ' '];
+        let trimmed_group = group.trim_matches(chars_to_trim);
+        let split_group: Vec<&str> = trimmed_group.split(' ').collect();
+
+        let high: isize = FromStr::from_str(split_group[1]).unwrap();
+        let low: isize = FromStr::from_str(split_group[2]).unwrap();
+        NewsGroup {
+            name: split_group[0].to_string(),
+            high,
+            low,
+            number: high - low,
+            status: split_group[3].to_string(),
+        }
+    }
+
+    pub fn from_group_response(group: &str) -> NewsGroup {
+        // 211 number low high group
         let chars_to_trim: &[char] = &['\r', '\n', ' '];
         let trimmed_group = group.trim_matches(chars_to_trim);
         let split_group: Vec<&str> = trimmed_group.split(' ').collect();
         NewsGroup {
-            name: split_group[0].to_string(),
-            high: FromStr::from_str(split_group[1]).unwrap(),
-            low: FromStr::from_str(split_group[2]).unwrap(),
-            status: split_group[3].to_string(),
+            number: FromStr::from_str(split_group[0]).unwrap(),
+            low: FromStr::from_str(split_group[1]).unwrap(),
+            high: FromStr::from_str(split_group[2]).unwrap(),
+            name: split_group[3].to_string(),
+            // status not returned in this command
+            status: "".to_owned(),
         }
     }
 }
@@ -254,7 +275,7 @@ impl NNTPStream {
             Ok(lines) => {
                 let lines: Vec<NewsGroup> = lines
                     .iter()
-                    .map(|ref mut x| NewsGroup::new_news_group(x))
+                    .map(|ref mut x| NewsGroup::from_list_response(x))
                     .collect();
                 Ok(lines)
             }
@@ -263,16 +284,16 @@ impl NNTPStream {
     }
 
     /// Selects a newsgroup
-    pub fn group(&mut self, group: &str) -> Result<()> {
+    pub fn group(&mut self, group: &str) -> Result<NewsGroup> {
         let group_command = format!("GROUP {}\r\n", group);
 
         match self.stream.write_fmt(format_args!("{}", group_command)) {
             Ok(_) => (),
             Err(e) => return Err(e),
-        }
+        };
 
         match self.read_response(211) {
-            Ok(_) => Ok(()),
+            Ok((_, res)) => Ok(NewsGroup::from_group_response(&res)),
             Err(e) => Err(e),
         }
     }
