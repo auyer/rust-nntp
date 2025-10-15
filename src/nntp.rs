@@ -109,8 +109,10 @@ impl NNTPStream {
         match socket.read_response(201) {
             Ok((status, response)) => println!("Connect: {} {}", status, response),
             Err(err) => {
-                println!("err: {}", err);
-                return Err(Error::other("Failed to read greeting response"));
+                return Err(Error::other(format!(
+                    "Failed to read greeting response: {}",
+                    err
+                )));
             }
         }
 
@@ -141,7 +143,7 @@ impl NNTPStream {
     fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
         match self.stream.write_fmt(format_args!("{}", article_command)) {
             Ok(_) => (),
-            Err(_) => return Err(Error::other("Failed to retreive atricle")),
+            Err(e) => return Err(Error::other(format!("Failed to retreive atricle: {}", e))),
         }
 
         match self.read_response(220) {
@@ -504,7 +506,7 @@ impl NNTPStream {
             let byte_buffer: &mut [u8] = &mut [0];
             match self.stream.read(byte_buffer) {
                 Ok(_) => {}
-                Err(_) => return Err(Error::other("Error reading response")),
+                Err(e) => return Err(Error::other(format!("Error reading response: {}", e))),
             }
             line_buffer.push(byte_buffer[0]);
         }
@@ -543,7 +545,9 @@ impl NNTPStream {
                 let byte_buffer: &mut [u8] = &mut [0];
                 match self.stream.read(byte_buffer) {
                     Ok(_) => {}
-                    Err(_) => println!("Error Reading!"),
+                    Err(e) => {
+                        return Err(Error::other(format!("Error Reading into buffer: {}", e)));
+                    }
                 }
                 line_buffer.push(byte_buffer[0]);
             }
@@ -557,7 +561,7 @@ impl NNTPStream {
                         line_buffer = Vec::new();
                     }
                 }
-                Err(_) => return Err(Error::other("Error Reading")),
+                Err(e) => return Err(Error::other(format!("Error Reading buffer: {}", e))),
             }
         }
         Ok(response)
