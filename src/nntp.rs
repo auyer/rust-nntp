@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::io::{Error, Read, Result, Write};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::str::FromStr;
 use std::string::String;
 use std::vec::Vec;
+use std::{fmt, io};
 
 /// Stream to be used for interfacing with a NNTP server.
 pub struct NNTPStream {
@@ -511,7 +511,22 @@ impl NNTPStream {
             line_buffer.push(byte_buffer[0]);
         }
 
-        let response = String::from_utf8(line_buffer).unwrap();
+        // Try to detect encoding and convert to UTF-8
+        // First try UTF-8, then fall back to WINDOWS-1252 (common in Usenet)
+        let (mut decoded_text, _, mut had_errors) = encoding_rs::UTF_8.decode(&line_buffer);
+
+        if had_errors {
+            // UTF-8 failed, try WINDOWS-1252
+            (decoded_text, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&line_buffer);
+
+            if had_errors {
+                // error again ?
+                return Err(io::Error::other(
+                    "Failed decoding body. Both UTF8 and WINDOWS_1252 failed",
+                ));
+            }
+        }
+        let response = decoded_text.to_string();
         let chars_to_trim: &[char] = &['\r', '\n'];
         let trimmed_response = response.trim_matches(chars_to_trim);
         let trimmed_response_vec: Vec<char> = trimmed_response.chars().collect();
@@ -552,16 +567,27 @@ impl NNTPStream {
                 line_buffer.push(byte_buffer[0]);
             }
 
-            match String::from_utf8(line_buffer.clone()) {
-                Ok(res) => {
-                    if res == ".\r\n" {
-                        complete = true;
-                    } else {
-                        response.push(res.clone());
-                        line_buffer = Vec::new();
-                    }
+            // Try to detect encoding and convert to UTF-8
+            // First try UTF-8, then fall back to WINDOWS-1252 (common in Usenet)
+            let (mut decoded_text, _, mut had_errors) = encoding_rs::UTF_8.decode(&line_buffer);
+
+            if had_errors {
+                // UTF-8 failed, try WINDOWS-1252
+                (decoded_text, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&line_buffer);
+
+                if had_errors {
+                    // error again ?
+                    return Err(io::Error::other(
+                        "Failed decoding body. Both UTF8 and WINDOWS_1252 failed",
+                    ));
                 }
-                Err(e) => return Err(Error::other(format!("Error Reading buffer: {}", e))),
+            }
+            let decoded_text = decoded_text.to_string();
+            if decoded_text == ".\r\n" {
+                complete = true;
+            } else {
+                response.push(decoded_text);
+                line_buffer = Vec::new();
             }
         }
         Ok(response)

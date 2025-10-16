@@ -16,3 +16,6 @@ path = "src/nntp.rs"
 [[bin]]
 name = "example"
 path = "example.rs"
+
+[dependencies]
+encoding_rs = "0.8.35"
