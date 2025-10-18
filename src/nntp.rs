@@ -4,6 +4,8 @@ use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::str::FromStr;
 use std::string::String;
+use std::thread::sleep;
+use std::time::Duration;
 use std::vec::Vec;
 use std::{fmt, io};
 
@@ -100,10 +102,40 @@ impl NewsGroup {
     }
 }
 
+fn connect_with_retry<A: ToSocketAddrs>(
+    addr: A,
+    max_retries: usize,
+    retry_delay_ms: usize,
+    timeout_secs: u64,
+) -> io::Result<TcpStream> {
+    let mut attempts = 0;
+    let timeout = Duration::from_secs(timeout_secs);
+    loop {
+        match TcpStream::connect(&addr) {
+            Ok(stream) => {
+                stream.set_read_timeout(Some(timeout))?;
+                stream.set_write_timeout(Some(timeout))?;
+
+                return Ok(stream);
+            }
+            Err(e) => {
+                eprintln!("Connection attempt failed: {}", e);
+                attempts += 1;
+                if attempts >= max_retries {
+                    // Return the last error after max retries
+                    return Err(e);
+                }
+                println!("Retrying in {}ms...", retry_delay_ms);
+                sleep(Duration::from_millis((retry_delay_ms * attempts) as u64));
+            }
+        }
+    }
+}
+
 impl NNTPStream {
     /// Creates an NNTP Stream.
     pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<NNTPStream> {
-        let tcp_stream = TcpStream::connect(addr)?;
+        let tcp_stream = connect_with_retry(addr, 3, 1000, 100)?;
         let mut socket = NNTPStream { stream: tcp_stream };
 
         match socket.read_response(201) {
@@ -117,6 +149,24 @@ impl NNTPStream {
         }
 
         Ok(socket)
+    }
+
+    pub fn re_connect(&mut self) -> Result<()> {
+        let tcp_stream = connect_with_retry(self.stream.peer_addr().unwrap(), 3, 1000, 100)?;
+        self.stream = tcp_stream;
+
+        match self.read_response(201) {
+            Ok((status, response)) => {
+                println!("Connect: {} {}", status, response);
+                return Ok(());
+            }
+            Err(err) => {
+                return Err(Error::other(format!(
+                    "Failed to read greeting response: {}",
+                    err
+                )));
+            }
+        }
     }
 
     /// The article indicated by the current article number in the currently selected newsgroup is selected.
