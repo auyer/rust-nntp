@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{Error, Read, Result, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::net::ToSocketAddrs;
 use std::str::FromStr;
@@ -8,6 +8,11 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::vec::Vec;
 use std::{fmt, io};
+
+pub mod errors;
+// re-export type for ease of use
+pub use errors::NNTPError;
+pub use errors::Result;
 
 /// Stream to be used for interfacing with a NNTP server.
 pub struct NNTPStream {
@@ -141,10 +146,10 @@ impl NNTPStream {
         match socket.read_response(201) {
             Ok((status, response)) => println!("Connect: {} {}", status, response),
             Err(err) => {
-                return Err(Error::other(format!(
-                    "Failed to read greeting response: {}",
-                    err
-                )));
+                return Err(NNTPError::FailedConnecting {
+                    expeted: "greeting response".to_owned(),
+                    error: Box::new(err),
+                });
             }
         }
 
@@ -161,10 +166,10 @@ impl NNTPStream {
                 return Ok(());
             }
             Err(err) => {
-                return Err(Error::other(format!(
-                    "Failed to read greeting response: {}",
-                    err
-                )));
+                return Err(NNTPError::FailedConnecting {
+                    expeted: "greeting response".to_owned(),
+                    error: Box::new(err),
+                });
             }
         }
     }
@@ -193,12 +198,19 @@ impl NNTPStream {
     fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
         match self.stream.write_fmt(format_args!("{}", article_command)) {
             Ok(_) => (),
-            Err(e) => return Err(Error::other(format!("Failed to retreive atricle: {}", e))),
+            Err(error) => return Err(errors::article_error_or_network(error)),
         }
 
         match self.read_response(220) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(e) => match e {
+                // TODO: replcace by status code evaluation
+                NNTPError::ResponseCode {
+                    expeted: 220,
+                    received: 423,
+                } => return Err(errors::NNTPError::ArticleUnavailable),
+                _ => return Err(e),
+            },
         }
 
         match self.read_multiline_response() {
@@ -210,12 +222,19 @@ impl NNTPStream {
     fn retrieve_raw_article(&mut self, article_command: &str) -> Result<Vec<String>> {
         match self.stream.write_fmt(format_args!("{}", article_command)) {
             Ok(_) => (),
-            Err(_) => return Err(Error::other("Failed to retreive atricle")),
+            Err(error) => return Err(errors::article_error_or_network(error)),
         }
 
         match self.read_response(220) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(e) => match e {
+                // TODO: replcace by status code evaluation
+                NNTPError::ResponseCode {
+                    expeted: 220,
+                    received: 423,
+                } => return Err(errors::NNTPError::ArticleUnavailable),
+                _ => return Err(e),
+            },
         }
 
         match self.read_multiline_response() {
@@ -242,7 +261,7 @@ impl NNTPStream {
     fn retrieve_body(&mut self, body_command: &str) -> Result<Vec<String>> {
         match self.stream.write_fmt(format_args!("{}", body_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(222) {
@@ -262,7 +281,7 @@ impl NNTPStream {
             .write_fmt(format_args!("{}", capabilities_command))
         {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(101) {
@@ -279,7 +298,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", date_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(111) {
@@ -306,7 +325,7 @@ impl NNTPStream {
     fn retrieve_head(&mut self, head_command: &str) -> Result<Vec<String>> {
         match self.stream.write_fmt(format_args!("{}", head_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(221) {
@@ -323,7 +342,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", last_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(223) {
@@ -338,7 +357,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", list_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(215) {
@@ -364,7 +383,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", group_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         };
 
         match self.read_response(211) {
@@ -379,7 +398,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", help_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(100) {
@@ -395,7 +414,7 @@ impl NNTPStream {
         let quit_command = "QUIT\r\n".to_string();
         match self.stream.write_fmt(format_args!("{}", quit_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(205) {
@@ -413,7 +432,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", newgroups_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(231) {
@@ -439,7 +458,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", newnews_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(230) {
@@ -455,7 +474,7 @@ impl NNTPStream {
         let next_command = "NEXT\r\n".to_string();
         match self.stream.write_fmt(format_args!("{}", next_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(223) {
@@ -467,16 +486,17 @@ impl NNTPStream {
     /// Posts a message to the NNTP server.
     pub fn post(&mut self, message: &str) -> Result<()> {
         if !self.is_valid_message(message) {
-            return Err(Error::other(
-                "Invalid message format. Message must end with \"\r\n.\r\n\"",
-            ));
+            return Err(NNTPError::InvalidMessage {
+                message: message.to_owned(),
+                reason: "Invalid message format. Message must end with \"\r\n.\r\n\"".to_owned(),
+            });
         }
 
         let post_command = "POST\r\n".to_string();
 
         match self.stream.write_fmt(format_args!("{}", post_command)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(340) {
@@ -486,7 +506,7 @@ impl NNTPStream {
 
         match self.stream.write_fmt(format_args!("{}", message)) {
             Ok(_) => (),
-            Err(e) => return Err(e),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(240) {
@@ -513,7 +533,7 @@ impl NNTPStream {
     fn retrieve_stat(&mut self, stat_command: &str) -> Result<String> {
         match self.stream.write_fmt(format_args!("{}", stat_command)) {
             Ok(_) => (),
-            Err(_) => return Err(Error::other("Write Error")),
+            Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
         match self.read_response(223) {
@@ -556,7 +576,7 @@ impl NNTPStream {
             let byte_buffer: &mut [u8] = &mut [0];
             match self.stream.read(byte_buffer) {
                 Ok(_) => {}
-                Err(e) => return Err(Error::other(format!("Error reading response: {}", e))),
+                Err(error) => return Err(errors::response_error_or_network(error)),
             }
             line_buffer.push(byte_buffer[0]);
         }
@@ -571,9 +591,7 @@ impl NNTPStream {
 
             if had_errors {
                 // error again ?
-                return Err(io::Error::other(
-                    "Failed decoding body. Both UTF8 and WINDOWS_1252 failed",
-                ));
+                return Err(NNTPError::DecodingError);
             }
         }
         let response = decoded_text.to_string();
@@ -581,14 +599,19 @@ impl NNTPStream {
         let trimmed_response = response.trim_matches(chars_to_trim);
         let trimmed_response_vec: Vec<char> = trimmed_response.chars().collect();
         if trimmed_response_vec.len() < 5 || trimmed_response_vec[3] != ' ' {
-            return Err(Error::other("Invalid response"));
+            return Err(NNTPError::InvalidResponse {
+                response: trimmed_response_vec.into_iter().collect(),
+            });
         }
 
         let v: Vec<&str> = trimmed_response.splitn(2, ' ').collect();
         let code: isize = FromStr::from_str(v[0]).unwrap();
         let message = v[1];
         if code != expected_code {
-            return Err(Error::other("Invalid response"));
+            return Err(NNTPError::ResponseCode {
+                expeted: expected_code,
+                received: code,
+            });
         }
         Ok((code, message.to_string()))
     }
@@ -610,9 +633,7 @@ impl NNTPStream {
                 let byte_buffer: &mut [u8] = &mut [0];
                 match self.stream.read(byte_buffer) {
                     Ok(_) => {}
-                    Err(e) => {
-                        return Err(Error::other(format!("Error Reading into buffer: {}", e)));
-                    }
+                    Err(error) => return Err(errors::response_error_or_network(error)),
                 }
                 line_buffer.push(byte_buffer[0]);
             }
@@ -627,9 +648,7 @@ impl NNTPStream {
 
                 if had_errors {
                     // error again ?
-                    return Err(io::Error::other(
-                        "Failed decoding body. Both UTF8 and WINDOWS_1252 failed",
-                    ));
+                    return Err(NNTPError::DecodingError);
                 }
             }
             let decoded_text = decoded_text.to_string();
