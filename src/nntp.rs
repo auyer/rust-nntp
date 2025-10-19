@@ -10,6 +10,7 @@ use std::vec::Vec;
 use std::{fmt, io};
 
 pub mod errors;
+pub mod codes;
 // re-export type for ease of use
 pub use errors::NNTPError;
 pub use errors::Result;
