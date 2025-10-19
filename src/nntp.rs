@@ -148,7 +148,7 @@ impl NNTPStream {
             Ok((status, response)) => println!("Connect: {} {}", status, response),
             Err(err) => {
                 return Err(NNTPError::FailedConnecting {
-                    expeted: "greeting response".to_owned(),
+                    expected: "greeting response".to_owned(),
                     error: Box::new(err),
                 });
             }
@@ -168,7 +168,7 @@ impl NNTPStream {
             }
             Err(err) => {
                 return Err(NNTPError::FailedConnecting {
-                    expeted: "greeting response".to_owned(),
+                    expected: "greeting response".to_owned(),
                     error: Box::new(err),
                 });
             }
@@ -205,9 +205,9 @@ impl NNTPStream {
         match self.read_response(220) {
             Ok(_) => (),
             Err(e) => match e {
-                // TODO: replcace by status code evaluation
+                // TODO: replace by status code evaluation
                 NNTPError::ResponseCode {
-                    expeted: 220,
+                    expected: 220,
                     received: 423,
                 } => return Err(errors::NNTPError::ArticleUnavailable),
                 _ => return Err(e),
@@ -229,9 +229,9 @@ impl NNTPStream {
         match self.read_response(220) {
             Ok(_) => (),
             Err(e) => match e {
-                // TODO: replcace by status code evaluation
+                // TODO: replace by status code evaluation
                 NNTPError::ResponseCode {
-                    expeted: 220,
+                    expected: 220,
                     received: 423,
                 } => return Err(errors::NNTPError::ArticleUnavailable),
                 _ => return Err(e),
@@ -610,7 +610,7 @@ impl NNTPStream {
         let message = v[1];
         if code != expected_code {
             return Err(NNTPError::ResponseCode {
-                expeted: expected_code,
+                expected: expected_code,
                 received: code,
             });
         }

@@ -22,22 +22,22 @@ pub enum NNTPError {
     #[error("Failed writing request to stream. returned with error: {error}")]
     FailedWritingRequest { error: io::Error },
 
-    #[error("Failed Connecting. expeted: {expeted}, returned with error: {error}")]
+    #[error("Failed Connecting. expected: {expected}, returned with error: {error}")]
     FailedConnecting {
         error: Box<NNTPError>,
-        expeted: String,
+        expected: String,
     },
     #[error("Failed decoding body. Both UTF8 and WINDOWS_1252 failed. error")]
     DecodingError,
 
-    #[error("Invalid Response froms server. Response: {response}")]
+    #[error("Invalid Response forms server. Response: {response}")]
     InvalidResponse { response: String },
 
     #[error("Invalid message from server. likely reason: {reason} message: {message}")]
     InvalidMessage { message: String, reason: String },
 
-    #[error("Invalid Response froms server. expeted {expeted}, received {received}")]
-    ResponseCode { expeted: isize, received: isize },
+    #[error("Invalid Response forms server. expected {expected}, received {received}")]
+    ResponseCode { expected: isize, received: isize },
 }
 
 pub fn check_network_error(error: NNTPError) -> bool {
