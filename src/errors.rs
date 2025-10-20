@@ -2,6 +2,8 @@ use std::io::{self, ErrorKind};
 use std::result;
 use thiserror::Error;
 
+use crate::ResponseCode;
+
 pub type Result<T> = result::Result<T, NNTPError>;
 
 #[derive(Error, Debug)]
@@ -37,7 +39,10 @@ pub enum NNTPError {
     InvalidMessage { message: String, reason: String },
 
     #[error("Invalid Response forms server. expected {expected}, received {received}")]
-    ResponseCode { expected: isize, received: isize },
+    ResponseCode {
+        expected: ResponseCode,
+        received: isize,
+    },
 }
 
 pub fn check_network_error(error: NNTPError) -> bool {

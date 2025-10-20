@@ -19,4 +19,5 @@ path = "example.rs"
 
 [dependencies]
 encoding_rs = "0.8.35"
+strum = { version = "0.27", features = ["derive"] }
 thiserror = "2.0.17"
