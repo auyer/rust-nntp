@@ -606,16 +606,30 @@ impl NNTPStream {
             });
         }
 
-        let v: Vec<&str> = trimmed_response.splitn(2, ' ').collect();
-        let code: isize = FromStr::from_str(v[0]).unwrap();
-        let message = v[1];
-        if code != expected_code.into() {
-            return Err(NNTPError::ResponseCode {
-                expected: expected_code,
-                received: code,
-            });
+        let response_parts: Vec<&str> = trimmed_response.splitn(2, ' ').collect();
+
+        let code = response_parts[0].parse::<isize>();
+        match code {
+            Ok(code) => {
+                let message = response_parts[1];
+                if code != expected_code.into() {
+                    return Err(NNTPError::ResponseCode {
+                        expected: expected_code,
+                        received: code,
+                    });
+                }
+                Ok((code, message.to_string()))
+            }
+            Err(e) => {
+                log::warn!(
+                    "error parsing '{}' as a ResponseCode: {e}",
+                    response_parts[0]
+                );
+                return Err(NNTPError::InvalidResponse {
+                    response: trimmed_response.to_string(),
+                });
+            }
         }
-        Ok((code, message.to_string()))
     }
 
     fn read_multiline_response(&mut self) -> Result<Vec<String>> {
