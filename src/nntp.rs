@@ -126,13 +126,13 @@ fn connect_with_retry<A: ToSocketAddrs>(
                 return Ok(stream);
             }
             Err(e) => {
-                eprintln!("Connection attempt failed: {}", e);
+                log::warn!("Connection attempt failed: {}", e);
                 attempts += 1;
                 if attempts >= max_retries {
                     // Return the last error after max retries
                     return Err(e);
                 }
-                println!("Retrying in {}ms...", retry_delay_ms);
+                log::warn!("Retrying in {}ms...", retry_delay_ms * attempts);
                 sleep(Duration::from_millis((retry_delay_ms * attempts) as u64));
             }
         }
@@ -146,7 +146,7 @@ impl NNTPStream {
         let mut socket = NNTPStream { stream: tcp_stream };
 
         match socket.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
-            Ok((status, response)) => println!("Connect: {} {}", status, response),
+            Ok((status, response)) => log::info!("Connect: {} {}", status, response),
             Err(err) => {
                 return Err(NNTPError::FailedConnecting {
                     expected: "greeting response".to_owned(),
@@ -164,7 +164,7 @@ impl NNTPStream {
 
         match self.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
             Ok((status, response)) => {
-                println!("Connect: {} {}", status, response);
+                log::info!("Connect: {} {}", status, response);
                 return Ok(());
             }
             Err(err) => {
