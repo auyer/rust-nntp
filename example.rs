@@ -1,9 +1,10 @@
 extern crate nntp;
 
+
 use nntp::{Article, NNTPStream};
 
 fn main() {
-    let mut nntp_stream = match NNTPStream::connect(("nntp.aioe.org", 119)) {
+    let mut nntp_stream = match NNTPStream::connect(format!("nntp.aioe.org:{}", 119)) {
         Ok(stream) => stream,
         Err(e) => panic!("{}", e),
     };

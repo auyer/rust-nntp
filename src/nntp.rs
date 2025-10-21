@@ -1,3 +1,4 @@
+use core::net;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -18,6 +19,7 @@ pub use errors::Result;
 
 /// Stream to be used for interfacing with a NNTP server.
 pub struct NNTPStream {
+    server_address: String,
     stream: TcpStream,
 }
 
@@ -109,41 +111,89 @@ impl NewsGroup {
     }
 }
 
-fn connect_with_retry<A: ToSocketAddrs>(
-    addr: A,
+fn connect_with_retry(
+    addr: &str,
     max_retries: usize,
     retry_delay_ms: usize,
     timeout_secs: u64,
 ) -> io::Result<TcpStream> {
+    let server: Vec<net::SocketAddr> = addr.to_socket_addrs()?.collect();
+
+    if server.is_empty() {
+        log::warn!("Address resolved to no socket addresses.");
+        return Err(io::Error::other("address resolution failed"));
+    }
+
+    log::debug!(
+        "addr resolved into multiple addresses, trying them cyclically {:#?}",
+        server
+    );
+
+    // .cycle() creates an iterator that repeats the list of addresses indefinitely
+    let mut addr_iter = server.iter().cycle();
+
     let mut attempts = 0;
+    let mut last_error: Option<io::Error> = None;
     let timeout = Duration::from_secs(timeout_secs);
-    loop {
-        match TcpStream::connect(&addr) {
+
+    // at least one connection should be attempted
+    while attempts <= max_retries {
+        let address = addr_iter
+            .next()
+            .expect("addresses should not be empty at this point");
+
+        log::debug!(
+            "Attempt {}/{}: Trying {}",
+            attempts + 1,
+            max_retries,
+            address
+        );
+
+        match TcpStream::connect_timeout(address, timeout) {
             Ok(stream) => {
+                // Success! Set timeouts and return the stream.
                 stream.set_read_timeout(Some(timeout))?;
                 stream.set_write_timeout(Some(timeout))?;
-
+                log::info!("Successfully connected to {}", address);
                 return Ok(stream);
             }
             Err(e) => {
                 log::warn!("Connection attempt failed: {}", e);
+                last_error = Some(e);
                 attempts += 1;
-                if attempts >= max_retries {
-                    // Return the last error after max retries
-                    return Err(e);
+
+                // If we still have attempts left, sleep before the next one
+                if attempts < max_retries {
+                    // linear backoff
+                    let delay_ms = (retry_delay_ms * attempts) as u64;
+                    log::warn!("Retrying in {}ms...", delay_ms);
+                    sleep(Duration::from_millis(delay_ms));
                 }
-                log::warn!("Retrying in {}ms...", retry_delay_ms * attempts);
-                sleep(Duration::from_millis((retry_delay_ms * attempts) as u64));
             }
         }
+    }
+
+    // If the loop finishes, we've exhausted all retries
+    log::error!(
+        "Exhausted all {} connection attempts for all addresses.",
+        max_retries
+    );
+
+    // Return the last error encountered.
+    match last_error {
+        Some(e) => Err(e),
+        None => Err(io::Error::other("Unknown error")),
     }
 }
 
 impl NNTPStream {
     /// Creates an NNTP Stream.
-    pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<NNTPStream> {
-        let tcp_stream = connect_with_retry(addr, 3, 1000, 100)?;
-        let mut socket = NNTPStream { stream: tcp_stream };
+    pub fn connect(addr: String) -> Result<NNTPStream> {
+        let tcp_stream = connect_with_retry(&addr, 3, 10_0000, 100)?;
+        let mut socket = NNTPStream {
+            stream: tcp_stream,
+            server_address: addr,
+        };
 
         match socket.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
             Ok((status, response)) => log::info!("Connect: {} {}", status, response),
@@ -159,7 +209,7 @@ impl NNTPStream {
     }
 
     pub fn re_connect(&mut self) -> Result<()> {
-        let tcp_stream = connect_with_retry(self.stream.peer_addr().unwrap(), 3, 1000, 100)?;
+        let tcp_stream = connect_with_retry(&self.server_address, 3, 10_000, 100)?;
         self.stream = tcp_stream;
 
         match self.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
