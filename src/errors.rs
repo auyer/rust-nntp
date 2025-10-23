@@ -45,10 +45,10 @@ pub enum NNTPError {
     },
 }
 
-pub fn check_network_error(error: NNTPError) -> bool {
+pub fn check_network_error(error: &NNTPError) -> bool {
     match error {
         NNTPError::Io(err) => {
-            return check_io_network_error(&err);
+            return check_io_network_error(err);
         }
         _ => return false,
     }
