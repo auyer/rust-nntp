@@ -64,8 +64,11 @@ fn check_io_network_error(err: &io::Error) -> bool {
         ErrorKind::TimedOut |         // Operation timed out
         ErrorKind::WouldBlock |       // Operation would block (non-blocking I/O)
         ErrorKind::Interrupted |      // Operation interrupted by a signal
-        ErrorKind::UnexpectedEof      // Unexpected end of file (can indicate a closed connection)
-        => true,
+        ErrorKind::UnexpectedEof |    // Unexpected end of file (can indicate a closed connection)
+        ErrorKind::HostUnreachable |
+        ErrorKind::AddrNotAvailable |
+        ErrorKind::NetworkUnreachable |
+        ErrorKind::NetworkDown => true,
         _ => false,
     }
 }
