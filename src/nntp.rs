@@ -164,8 +164,8 @@ fn connect_with_retry(
 
                 // If we still have attempts left, sleep before the next one
                 if attempts < max_retries {
-                    // linear backoff
-                    let delay_ms = (retry_delay_ms * attempts) as u64;
+                    // exponential backoff
+                    let delay_ms = (retry_delay_ms.pow(attempts as u32)) as u64;
                     log::warn!("Retrying in {}ms...", delay_ms);
                     sleep(Duration::from_millis(delay_ms));
                 }
@@ -189,7 +189,7 @@ fn connect_with_retry(
 impl NNTPStream {
     /// Creates an NNTP Stream.
     pub fn connect(addr: String) -> Result<NNTPStream> {
-        let tcp_stream = connect_with_retry(&addr, 3, 10_0000, 100)?;
+        let tcp_stream = connect_with_retry(&addr, 3, 7_0000, 100)?;
         let mut socket = NNTPStream {
             stream: tcp_stream,
             server_address: addr,
@@ -209,7 +209,7 @@ impl NNTPStream {
     }
 
     pub fn re_connect(&mut self) -> Result<()> {
-        let tcp_stream = connect_with_retry(&self.server_address, 3, 10_000, 100)?;
+        let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
         self.stream = tcp_stream;
 
         match self.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
