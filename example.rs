@@ -1,6 +1,5 @@
 extern crate nntp;
 
-
 use nntp::{Article, NNTPStream};
 
 fn main() {

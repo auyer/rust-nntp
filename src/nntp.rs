@@ -215,14 +215,12 @@ impl NNTPStream {
         match self.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
             Ok((status, response)) => {
                 log::info!("Connect: {} {}", status, response);
-                return Ok(());
+                Ok(())
             }
-            Err(err) => {
-                return Err(NNTPError::FailedConnecting {
-                    expected: "greeting response".to_owned(),
-                    error: Box::new(err),
-                });
-            }
+            Err(err) => Err(NNTPError::FailedConnecting {
+                expected: "greeting response".to_owned(),
+                error: Box::new(err),
+            }),
         }
     }
 
@@ -522,7 +520,7 @@ impl NNTPStream {
     }
 
     /// Moves the currently selected article number forward one
-    pub fn next(&mut self) -> Result<String> {
+    pub fn next_article(&mut self) -> Result<String> {
         let next_command = "NEXT\r\n".to_string();
         match self.stream.write_fmt(format_args!("{}", next_command)) {
             Ok(_) => (),
@@ -675,9 +673,9 @@ impl NNTPStream {
                     "error parsing '{}' as a ResponseCode: {e}",
                     response_parts[0]
                 );
-                return Err(NNTPError::InvalidResponse {
+                Err(NNTPError::InvalidResponse {
                     response: trimmed_response.to_string(),
-                });
+                })
             }
         }
     }

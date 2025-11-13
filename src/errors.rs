@@ -47,10 +47,8 @@ pub enum NNTPError {
 
 pub fn check_network_error(error: &NNTPError) -> bool {
     match error {
-        NNTPError::Io(err) => {
-            return check_io_network_error(err);
-        }
-        _ => return false,
+        NNTPError::Io(err) => check_io_network_error(err),
+        _ => false,
     }
 }
 
