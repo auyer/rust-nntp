@@ -124,10 +124,14 @@ fn connect_with_retry(
         return Err(io::Error::other("address resolution failed"));
     }
 
-    log::debug!(
-        "addr resolved into multiple addresses, trying them cyclically {:#?}",
-        server
-    );
+    if server.len() > 1 {
+        log::debug!(
+            "addr resolved into multiple addresses, trying them cyclically : {:#?}",
+            server
+        );
+    } else {
+        log::debug!("addr resolved into: {:#?}", server.first());
+    }
 
     // .cycle() creates an iterator that repeats the list of addresses indefinitely
     let mut addr_iter = server.iter().cycle();
