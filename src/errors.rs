@@ -38,9 +38,9 @@ pub enum NNTPError {
     #[error("Invalid message from server. likely reason: {reason} message: {message}")]
     InvalidMessage { message: String, reason: String },
 
-    #[error("Invalid Response forms server. expected {expected}, received {received}")]
+    #[error("Invalid Response forms server. expected {expected:?}, received {received}")]
     ResponseCode {
-        expected: ResponseCode,
+        expected: Vec<ResponseCode>,
         received: isize,
     },
 }

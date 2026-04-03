@@ -199,7 +199,10 @@ impl NNTPStream {
             server_address: addr,
         };
 
-        match socket.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
+        match socket.read_response(vec![
+            ResponseCode::ServiceAvailablePostingAllowed,
+            ResponseCode::ServiceAvailablePostingProhibited,
+        ]) {
             Ok((status, response)) => log::info!("Connect: {} {}", status, response),
             Err(err) => {
                 return Err(NNTPError::FailedConnecting {
@@ -216,7 +219,10 @@ impl NNTPStream {
         let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
         self.stream = tcp_stream;
 
-        match self.read_response(ResponseCode::ServiceAvailablePostingProhibited) {
+        match self.read_response(vec![
+            ResponseCode::ServiceAvailablePostingAllowed,
+            ResponseCode::ServiceAvailablePostingProhibited,
+        ]) {
             Ok((status, response)) => {
                 log::info!("Connect: {} {}", status, response);
                 Ok(())
@@ -255,12 +261,12 @@ impl NNTPStream {
             Err(error) => return Err(errors::article_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleFollows) {
+        match self.read_response(vec![ResponseCode::ArticleFollows]) {
             Ok(_) => (),
             Err(e) => match e {
                 // TODO: replace by status code evaluation
                 NNTPError::ResponseCode {
-                    expected: ResponseCode::ArticleFollows,
+                    expected: _,
                     received: 423,
                 } => return Err(errors::NNTPError::ArticleUnavailable),
                 _ => return Err(e),
@@ -279,12 +285,12 @@ impl NNTPStream {
             Err(error) => return Err(errors::article_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleFollows) {
+        match self.read_response(vec![ResponseCode::ArticleFollows]) {
             Ok(_) => (),
             Err(e) => match e {
                 // TODO: replace by status code evaluation
                 NNTPError::ResponseCode {
-                    expected: ResponseCode::ArticleFollows,
+                    expected: _,
                     received: 423,
                 } => return Err(errors::NNTPError::ArticleUnavailable),
                 _ => return Err(e),
@@ -318,7 +324,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleBodyFollows) {
+        match self.read_response(vec![ResponseCode::ArticleBodyFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -338,7 +344,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::CapabilitiesListFollows) {
+        match self.read_response(vec![ResponseCode::CapabilitiesListFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -355,7 +361,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ServerDateTime) {
+        match self.read_response(vec![ResponseCode::ServerDateTime]) {
             Ok((_, message)) => Ok(message),
             Err(e) => Err(e),
         }
@@ -382,7 +388,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleHeadersFollows) {
+        match self.read_response(vec![ResponseCode::ArticleHeadersFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -399,7 +405,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleExistsAndSelected) {
+        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
             Ok((_, message)) => Ok(message),
             Err(e) => Err(e),
         }
@@ -414,7 +420,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::InformationFollows) {
+        match self.read_response(vec![ResponseCode::InformationFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -440,7 +446,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         };
 
-        match self.read_response(ResponseCode::ArticleNumbersFollows) {
+        match self.read_response(vec![ResponseCode::ArticleNumbersFollows]) {
             Ok((_, res)) => Ok(NewsGroup::from_group_response(&res)),
             Err(e) => Err(e),
         }
@@ -455,7 +461,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::HelpTextFollows) {
+        match self.read_response(vec![ResponseCode::HelpTextFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -471,7 +477,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ConnectionClosing) {
+        match self.read_response(vec![ResponseCode::ConnectionClosing]) {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
         }
@@ -489,7 +495,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ListOfNewNewsgroupsFollows) {
+        match self.read_response(vec![ResponseCode::ListOfNewNewsgroupsFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -515,7 +521,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ListOfNewArticlesFollows) {
+        match self.read_response(vec![ResponseCode::ListOfNewArticlesFollows]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         }
@@ -531,7 +537,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleExistsAndSelected) {
+        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
             Ok((_, message)) => Ok(message),
             Err(e) => Err(e),
         }
@@ -553,7 +559,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::SendArticleToPost) {
+        match self.read_response(vec![ResponseCode::SendArticleToPost]) {
             Ok(_) => (),
             Err(e) => return Err(e),
         };
@@ -563,7 +569,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleReceivedOK) {
+        match self.read_response(vec![ResponseCode::ArticleReceivedOK]) {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
         }
@@ -590,7 +596,7 @@ impl NNTPStream {
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(ResponseCode::ArticleExistsAndSelected) {
+        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
             Ok((_, message)) => Ok(message),
             Err(e) => Err(e),
         }
@@ -615,8 +621,12 @@ impl NNTPStream {
                 && message_bytes[length - 5] == cr)
     }
 
-    //Retrieve single line response
-    fn read_response(&mut self, expected_code: codes::ResponseCode) -> Result<(isize, String)> {
+    // Retrieve single line response
+    // response matching any of the expected_code will be considered valid
+    fn read_response(
+        &mut self,
+        expected_code: Vec<codes::ResponseCode>,
+    ) -> Result<(isize, String)> {
         //Carriage return
         let cr = 0x0d;
         //Line Feed
@@ -664,13 +674,14 @@ impl NNTPStream {
         match code {
             Ok(code) => {
                 let message = response_parts[1];
-                if code != expected_code.into() {
-                    return Err(NNTPError::ResponseCode {
+                if expected_code.iter().any(|&exp| exp as isize == code) {
+                    Ok((code, message.to_string()))
+                } else {
+                    Err(NNTPError::ResponseCode {
                         expected: expected_code,
                         received: code,
-                    });
+                    })
                 }
-                Ok((code, message.to_string()))
             }
             Err(e) => {
                 log::warn!(
