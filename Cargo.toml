@@ -13,10 +13,6 @@ readme = "README.md"
 name = "nntp"
 path = "src/nntp.rs"
 
-[[examples]]
-name = "example"
-path = "examples/example.rs"
-
 [dependencies]
 encoding_rs = "0.8.35"
 strum = { version = "0.28", features = ["derive"] }
