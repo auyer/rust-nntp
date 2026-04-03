@@ -13,9 +13,9 @@ readme = "README.md"
 name = "nntp"
 path = "src/nntp.rs"
 
-[[bin]]
+[[examples]]
 name = "example"
-path = "example.rs"
+path = "examples/example.rs"
 
 [dependencies]
 encoding_rs = "0.8.35"
