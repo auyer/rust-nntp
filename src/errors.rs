@@ -1,11 +1,22 @@
+//! Error types for NNTP operations.
+//!
+//! This module defines the [`NNTPError`] enum, which covers all error conditions
+//! that can occur during NNTP communication, including I/O errors, protocol
+//! errors, decoding failures, and unexpected response codes.
+
 use std::io::{self, ErrorKind};
 use std::result;
 use thiserror::Error;
 
 use crate::ResponseCode;
 
+/// A specialized `Result` type for NNTP operations.
 pub type Result<T> = result::Result<T, NNTPError>;
 
+/// Errors that can occur during NNTP communication.
+///
+/// This enum covers network-level errors, protocol-level errors
+/// (unexpected response codes), and data parsing errors.
 #[derive(Error, Debug)]
 pub enum NNTPError {
     #[error("unknown data store error")]
@@ -45,6 +56,11 @@ pub enum NNTPError {
     },
 }
 
+/// Checks whether the given error represents a network-level error
+/// (connection refused, reset, timeout, etc.).
+///
+/// This is useful for determining whether a failed operation can be
+/// retried by reconnecting.
 pub fn check_network_error(error: &NNTPError) -> bool {
     match error {
         NNTPError::Io(err) => check_io_network_error(err),

@@ -1,71 +1,87 @@
-rust-nntp
-================
-NNTP Client for Rust
+# nntp
 
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-[![Build Status](https://travis-ci.org/mattnenterprise/rust-imap.svg)](https://travis-ci.org/mattnenterprise/rust-imap)
-[![crates.io](http://meritbadge.herokuapp.com/nntp)](https://crates.io/crates/nntp)
+A NNTP (Network News Transfer Protocol) client library for Rust, implementing
+[RFC 3977](https://tools.ietf.org/html/rfc3977) and
+[RFC 4643](https://tools.ietf.org/html/rfc4643) (authentication extension).
 
-### Usage
+## Features
+
+- Connect to NNTP servers with automatic retry and exponential backoff
+- Retrieve articles by number or message ID
+- Fetch article headers, body, or full content
+- List and select newsgroups
+- Post messages to newsgroups
+- USER/PASS authentication with automatic re-authentication on reconnect
+- UTF-8 and WINDOWS-1252 encoding support
+
+## Usage
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+nntp = "0.1.0"
+```
+
+### Example
+
 ```rust
-extern crate nntp;
+use nntp::NNTPStream;
 
-use nntp::{Article, NNTPStream};
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to an NNTP server
+    let mut client = NNTPStream::connect("nntp.example.com:119")?;
 
-fn main() {
-	let mut nntp_stream = match NNTPStream::connect(("nntp.aioe.org", 119)) {
-		Ok(stream) => stream,
-		Err(e) => panic!("{}", e)
-	};
+    // Optional: authenticate
+    // client.user_password_authenticate("user", "password")?;
 
-	match nntp_stream.capabilities() {
-		Ok(lines) => {
-			for line in lines.iter() {
-				print!("{}", line);
-			}
-		},
-		Err(e) => panic!(e)
-	}
+    // List available newsgroups
+    let groups = client.list()?;
+    for group in &groups {
+        println!("{} ({} articles)", group.name, group.number);
+    }
 
-	match nntp_stream.list() {
-		Ok(groups) => {
-			for group in groups.iter() {
-				println!("Name: {}, High: {}, Low: {}, Status: {}", group.name, group.high, group.low, group.status)
-			}
-		},
-		Err(e) => panic!(e)
-	};
+    // Select a newsgroup
+    let group = client.group("comp.test")?;
+    println!("Selected: {}", group);
 
-	match nntp_stream.group("comp.sys.raspberry-pi") {
-		Ok(_) => (),
-		Err(e) => panic!(e)
-	}
+    // Fetch an article
+    match client.article_by_number(1) {
+        Ok(article) => {
+            // Print headers
+            for (key, value) in &article.headers {
+                println!("{}: {}", key, value);
+            }
+            // Print body
+            for line in &article.body {
+                print!("{}", line);
+            }
+        }
+        Err(e) => eprintln!("Failed to fetch article: {}", e),
+    }
 
-	match nntp_stream.article_by_number(6187) {
-		Ok(Article{headers, body}) => {
-			for (key, value) in headers.iter() {
-				println!("{}: {}", key, value)
-			}
-			for line in body.iter() {
-				print!("{}", line)
-			}
-		},
-		Err(e) => panic!(e)
-	}
-
-	match nntp_stream.article_by_id("<cakj55F1dofU5@mid.individual.net>") {
-		Ok(Article{headers, body}) => {
-			for (key, value) in headers.iter() {
-				println!("{}: {}", key, value)
-			}
-			for line in body.iter() {
-				print!("{}", line)
-			}
-		},
-		Err(e) => panic!(e)
-	}
-
-	let _ = nntp_stream.quit();
+    // Disconnect
+    let _ = client.quit();
+    Ok(())
 }
 ```
 
+## Documentation
+
+- [API Documentation](https://docs.rs/nntp)
+- [RFC 3977 - Network News Transfer Protocol](https://tools.ietf.org/html/rfc3977)
+- [RFC 4643 - NNTP Authentication Extension](https://tools.ietf.org/html/rfc4643)
+
+## Minimum Supported Rust Version
+
+This crate uses Rust 2024 edition.
+
+## License
+
+Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

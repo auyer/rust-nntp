@@ -9,7 +9,21 @@ use crate::connection::connect_with_retry;
 use crate::errors::{self, NNTPError, Result};
 use crate::newsgroup::NewsGroup;
 
-/// Stream to be used for interfacing with a NNTP server.
+/// A connection to an NNTP server.
+///
+/// `NNTPStream` wraps a TCP connection and provides methods for sending NNTP
+/// commands and parsing responses. It handles encoding detection (UTF-8 and
+/// WINDOWS-1252), automatic reconnection with retry, and optional authentication.
+///
+/// # Example
+///
+/// ```no_run
+/// use nntp::NNTPStream;
+///
+/// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+///     .expect("Failed to connect");
+/// let _ = client.quit();
+/// ```
 pub struct NNTPStream {
     server_address: String,
     stream: TcpStream,
@@ -18,9 +32,29 @@ pub struct NNTPStream {
     password: Option<String>,
 }
 
-/// connection calls
+/// Connection management
 impl NNTPStream {
-    /// Creates an NNTP Stream.
+    /// Connects to an NNTP server at the given address.
+    ///
+    /// The address should be in the format `"host:port"` (e.g. `"nntp.example.com:119"`).
+    /// The connection attempt uses exponential backoff with up to 3 retries.
+    ///
+    /// On successful connection, the server's greeting response (code 200 or 201)
+    /// is consumed and logged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::FailedConnecting`] if the connection fails or the
+    /// server greeting is not recognized.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// ```
     pub fn connect(addr: String) -> Result<NNTPStream> {
         let tcp_stream = connect_with_retry(&addr, 3, 7_0000, 100)?;
         let mut socket = NNTPStream {
@@ -47,7 +81,16 @@ impl NNTPStream {
         Ok(socket)
     }
 
-    /// attempts to reconnect a failed connection
+    /// Reconnects to the server using the same address.
+    ///
+    /// This is useful after a connection has been lost. If the stream was
+    /// previously authenticated, this method will automatically re-authenticate
+    /// using the stored credentials.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::FailedConnecting`] if reconnection fails, or
+    /// propagates authentication errors from [`NNTPStream::user_password_authenticate`].
     pub fn re_connect(&mut self) -> Result<()> {
         let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
 
@@ -81,10 +124,31 @@ impl NNTPStream {
         res
     }
 
-    /// Authenticate using USER/PASS method.
-    /// Stores credentials for use during reconnection.
-    /// some server might require set_mode request: [`set_mode`, `set_mode_reader``,
-    /// `set_mode_poster`]
+    /// Authenticates with the server using the `AUTHINFO USER/PASS` method (RFC 4643).
+    ///
+    /// Sends `AUTHINFO USER <username>` followed by `AUTHINFO PASS <password>`.
+    /// Some servers may accept the USER command alone (returning 281), in which
+    /// case the PASS step is skipped.
+    ///
+    /// This method also issues `MODE READER` before authentication, as some
+    /// servers require it. Credentials are stored internally so that
+    /// [`NNTPStream::re_connect`] can re-authenticate automatically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ResponseCode`] if authentication fails (e.g. wrong
+    /// credentials), or propagates I/O errors.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// client.user_password_authenticate("user", "password")
+    ///     .expect("Authentication failed");
+    /// ```
     pub fn user_password_authenticate(&mut self, username: &str, password: &str) -> Result<()> {
         // TODO: allow posting mode too
 
@@ -108,75 +172,160 @@ impl NNTPStream {
     }
 }
 
-/// commands
+/// Article retrieval commands (RFC 3977 §6)
 impl NNTPStream {
-    /// The article indicated by the current article number in the currently selected newsgroup is selected.
+    /// Retrieves the full article (headers and body) indicated by the current
+    /// article number in the currently selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists at the
+    /// current number, or a response error with code 412 if no group is selected.
     pub fn article(&mut self) -> Result<Article> {
         self.retrieve_article("ARTICLE\r\n")
     }
 
-    /// The article indicated by the article id is selected.
+    /// Retrieves the full article identified by the given message ID.
+    ///
+    /// The `article_id` should include angle brackets (e.g. `"<abc123@example.com>"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if the message ID is not found.
     pub fn article_by_id(&mut self, article_id: &str) -> Result<Article> {
         self.retrieve_article(&format!("ARTICLE {}\r\n", article_id))
     }
 
-    /// The article indicated by the article number in the currently selected newsgroup is selected.
+    /// Retrieves the full article with the given number in the currently
+    /// selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists with that number.
     pub fn article_by_number(&mut self, article_number: isize) -> Result<Article> {
         self.retrieve_article(&format!("ARTICLE {}\r\n", article_number))
     }
 
-    /// The article indicated by the article number in the currently selected newsgroup is selected.
-    /// returns the raw email line by line
+    /// Retrieves the raw article content (headers and body as raw lines) for the
+    /// given article number in the currently selected newsgroup.
+    ///
+    /// Unlike [`NNTPStream::article_by_number`], this returns the unparsed lines
+    /// instead of a structured [`Article`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists with that number.
     pub fn raw_article_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
         self.retrieve_raw_article(&format!("ARTICLE {}\r\n", article_number))
     }
 
-    /// Retrieves the body of the current article number in the currently selected newsgroup.
+    /// Retrieves the body of the article indicated by the current article number
+    /// in the currently selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists at the current number.
     pub fn body(&mut self) -> Result<Vec<String>> {
         self.retrieve_body("BODY\r\n")
     }
 
-    /// Retrieves the body of the article id.
+    /// Retrieves the body of the article identified by the given message ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if the message ID is not found.
     pub fn body_by_id(&mut self, article_id: &str) -> Result<Vec<String>> {
         self.retrieve_body(&format!("BODY {}\r\n", article_id))
     }
 
-    /// Retrieves the body of the article number in the currently selected newsgroup.
+    /// Retrieves the body of the article with the given number in the currently
+    /// selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists with that number.
     pub fn body_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
         self.retrieve_body(&format!("BODY {}\r\n", article_number))
     }
 
-    /// Gets information about the current article.
-    pub fn stat(&mut self) -> Result<String> {
-        self.retrieve_stat("STAT\r\n")
-    }
-
-    /// Gets the information about the article id.
-    pub fn stat_by_id(&mut self, article_id: &str) -> Result<String> {
-        self.retrieve_stat(&format!("STAT {}\r\n", article_id))
-    }
-
-    /// Gets the information about the article number.
-    pub fn stat_by_number(&mut self, article_number: isize) -> Result<String> {
-        self.retrieve_stat(&format!("STAT {}\r\n", article_number))
-    }
-
-    /// Retrieves the headers of the current article number in the currently selected newsgroup.
+    /// Retrieves the headers of the article indicated by the current article number
+    /// in the currently selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists at the current number.
     pub fn head(&mut self) -> Result<Vec<String>> {
         self.retrieve_head("HEAD\r\n")
     }
 
-    /// Retrieves the headers of the article id.
+    /// Retrieves the headers of the article identified by the given message ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if the message ID is not found.
     pub fn head_by_id(&mut self, article_id: &str) -> Result<Vec<String>> {
         self.retrieve_head(&format!("HEAD {}\r\n", article_id))
     }
 
-    /// Retrieves the headers of the article number in the currently selected newsgroup.
+    /// Retrieves the headers of the article with the given number in the currently
+    /// selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists with that number.
     pub fn head_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
         self.retrieve_head(&format!("HEAD {}\r\n", article_number))
     }
 
-    /// Gives the list of capabilities that the server has.
+    /// Retrieves metadata (article number and message ID) for the article
+    /// indicated by the current article number.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists at the current number.
+    pub fn stat(&mut self) -> Result<String> {
+        self.retrieve_stat("STAT\r\n")
+    }
+
+    /// Retrieves metadata for the article identified by the given message ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if the message ID is not found.
+    pub fn stat_by_id(&mut self, article_id: &str) -> Result<String> {
+        self.retrieve_stat(&format!("STAT {}\r\n", article_id))
+    }
+
+    /// Retrieves metadata for the article with the given number in the currently
+    /// selected newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ArticleUnavailable`] if no article exists with that number.
+    pub fn stat_by_number(&mut self, article_number: isize) -> Result<String> {
+        self.retrieve_stat(&format!("STAT {}\r\n", article_number))
+    }
+}
+
+/// Information and listing commands (RFC 3977 §7)
+impl NNTPStream {
+    /// Retrieves the list of capabilities supported by the server.
+    ///
+    /// Returns a list of capability labels. Each entry may include optional
+    /// arguments in parentheses.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// let caps = client.capabilities().expect("Failed to get capabilities");
+    /// for cap in &caps {
+    ///     println!("{}", cap);
+    /// }
+    /// ```
     pub fn capabilities(&mut self) -> Result<Vec<String>> {
         self.send_command_expect_multiline_response(
             "CAPABILITIES\r\n",
@@ -184,22 +333,49 @@ impl NNTPStream {
         )
     }
 
-    /// Retrieves the date as the server sees the date.
+    /// Retrieves the server's current date and time.
+    ///
+    /// Returns the date in `YYYYMMDDHHMMSS` format as reported by the server.
     pub fn date(&mut self) -> Result<String> {
         self.send_command_expect_response("DATE\r\n", vec![ResponseCode::ServerDateTime])
     }
 
-    /// Moves the currently selected article number forward one
+    /// Advances the current article pointer to the next article in the selected
+    /// newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns a response error with code 421 if the current article is the last
+    /// in the group, or code 412 if no group is selected.
     pub fn next_article(&mut self) -> Result<String> {
         self.send_command_expect_response("NEXT\r\n", vec![ResponseCode::ArticleExistsAndSelected])
     }
 
-    /// Moves the currently selected article number back one
+    /// Moves the current article pointer to the previous article in the selected
+    /// newsgroup.
+    ///
+    /// # Errors
+    ///
+    /// Returns a response error with code 422 if the current article is the
+    /// first in the group, or code 412 if no group is selected.
     pub fn last(&mut self) -> Result<String> {
         self.send_command_expect_response("LAST\r\n", vec![ResponseCode::ArticleExistsAndSelected])
     }
 
-    /// Lists all of the newgroups on the server.
+    /// Lists all newsgroups available on the server.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// let groups = client.list().expect("Failed to list groups");
+    /// for group in &groups {
+    ///     println!("{}", group);
+    /// }
+    /// ```
     pub fn list(&mut self) -> Result<Vec<NewsGroup>> {
         match self.stream.write_all(b"LIST\r\n") {
             Ok(_) => (),
@@ -223,7 +399,26 @@ impl NNTPStream {
         }
     }
 
-    /// Selects a newsgroup
+    /// Selects a newsgroup as the currently active group.
+    ///
+    /// After selecting a group, article retrieval commands (`article`, `body`,
+    /// `head`, `stat`) operate relative to this group's article numbers.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// let group = client.group("comp.test")
+    ///     .expect("Failed to select group");
+    /// println!("{} articles in {}", group.number, group.name);
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns a response error with code 411 if the newsgroup does not exist.
     pub fn group(&mut self, group: &str) -> Result<NewsGroup> {
         let group_command = format!("GROUP {}\r\n", group);
 
@@ -238,16 +433,26 @@ impl NNTPStream {
         }
     }
 
-    /// Show the help command given on the server.
+    /// Retrieves the server's help text.
+    ///
+    /// Returns a multi-line help string describing available commands.
     pub fn help(&mut self) -> Result<Vec<String>> {
         self.send_command_expect_multiline_response("HELP\r\n", vec![ResponseCode::HelpTextFollows])
     }
 
-    /// Retrieves a list of newsgroups since the date and time given.
+    /// Retrieves a list of newsgroups created since the given date and time.
+    ///
+    /// The `date` should be in `YYMMDD` format and `time` in `HHMMSS` format.
+    /// Set `use_gmt` to `true` to interpret the time as GMT.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ResponseCode`] if the server does not support the
+    /// NEWGROUPS command or the date format is invalid.
     pub fn newgroups(&mut self, date: &str, time: &str, use_gmt: bool) -> Result<Vec<String>> {
         let newgroups_command = match use_gmt {
-            true => format!("NEWSGROUP {} {} GMT\r\n", date, time),
-            false => format!("NEWSGROUP {} {}\r\n", date, time),
+            true => format!("NEWGROUPS {} {} GMT\r\n", date, time),
+            false => format!("NEWGROUPS {} {}\r\n", date, time),
         };
 
         self.send_command_expect_multiline_response(
@@ -256,7 +461,12 @@ impl NNTPStream {
         )
     }
 
-    /// Retrieves a list of new news since the date and time given.
+    /// Retrieves a list of new articles posted since the given date and time
+    /// in the newsgroups matching the `wildmat` pattern.
+    ///
+    /// The `wildmat` is a wildcard pattern (e.g. `"comp.*"`). The `date` should
+    /// be in `YYMMDD` format and `time` in `HHMMSS` format.
+    /// Set `use_gmt` to `true` to interpret the time as GMT.
     pub fn newnews(
         &mut self,
         wildmat: &str,
@@ -275,7 +485,22 @@ impl NNTPStream {
         )
     }
 
-    /// Quits the current session.
+    /// Closes the connection to the NNTP server.
+    ///
+    /// Sends the `QUIT` command and waits for the server's closing response.
+    /// After calling this method, the stream should not be used for further
+    /// commands.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    /// // ... do work ...
+    /// let _ = client.quit();
+    /// ```
     pub fn quit(&mut self) -> Result<()> {
         match self.stream.write_all(b"QUIT\r\n") {
             Ok(_) => (),
@@ -288,9 +513,16 @@ impl NNTPStream {
         }
     }
 
-    /// send MODE command to server
-    /// - READER
-    /// - POSTER
+    /// Sends the `MODE` command to the server.
+    ///
+    /// The `mode` argument should be `"READER"` or `"POSTER"` (case-insensitive).
+    /// `MODE READER` tells the server that the client is a news reader, while
+    /// `MODE POSTER` indicates the client intends to post articles.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ResponseCode`] if the server does not support the
+    /// requested mode.
     pub fn set_mode(&mut self, mode: &str) -> Result<String> {
         let mode_upper = mode.to_uppercase();
         self.send_command_expect_response(
@@ -302,8 +534,10 @@ impl NNTPStream {
         )
     }
 
-    /// send MODE command to server
-    /// - READER
+    /// Sends `MODE READER` to indicate the client is a news reader.
+    ///
+    /// This is typically issued before authentication. The server responds
+    /// with code 200 (posting allowed) or 201 (posting prohibited).
     pub fn set_mode_reader(&mut self) -> Result<String> {
         self.send_command_expect_response(
             "MODE READER\r\n",
@@ -314,8 +548,13 @@ impl NNTPStream {
         )
     }
 
-    /// send MODE command to server
-    /// - POSTER
+    /// Sends `MODE POSTER` to indicate the client intends to post articles.
+    ///
+    /// The server will respond with code 200 if posting is allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::ResponseCode`] (502) if posting is not permitted.
     pub fn set_mode_poster(&mut self) -> Result<String> {
         self.send_command_expect_response(
             "MODE POSTER\r\n",
@@ -324,9 +563,13 @@ impl NNTPStream {
     }
 }
 
-/// RFC4643 Network News Transfer Protocol (NNTP) Extension for Authentication
+/// Authentication commands (RFC 4643)
 impl NNTPStream {
-    /// auth_user sends the username command to the server
+    /// Sends `AUTHINFO USER` to the server.
+    ///
+    /// Accepts either [`ResponseCode::AuthenticationAccepted`] (281, server
+    /// accepts without password) or [`ResponseCode::PasswordRequired`] (381,
+    /// password needed).
     fn auth_user(&mut self, username: &str) -> Result<String> {
         self.send_command_expect_response(
             &format!("AUTHINFO USER {}\r\n", username),
@@ -337,7 +580,9 @@ impl NNTPStream {
         )
     }
 
-    /// auth_password sends the password command to the server
+    /// Sends `AUTHINFO PASS` to the server.
+    ///
+    /// Expects [`ResponseCode::AuthenticationAccepted`] (281) on success.
     fn auth_password(&mut self, password: &str) -> Result<String> {
         self.send_command_expect_response(
             &format!("AUTHINFO PASS {}\r\n", password),
@@ -348,9 +593,42 @@ impl NNTPStream {
     // TODO: implement SASL ?
 }
 
-/// write commands
+/// Posting commands (RFC 3977 §5)
 impl NNTPStream {
-    /// Posts a message to the NNTP server.
+    /// Posts a message to the currently selected newsgroup.
+    ///
+    /// The `message` must be a complete article including headers and body,
+    /// terminated with `\r\n.\r\n` (a line containing only a dot).
+    ///
+    /// # Message format
+    ///
+    /// The message should include standard headers such as `From`, `Newsgroups`,
+    /// `Subject`, and `Date`. The server will validate these before accepting
+    /// the post.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NNTPError::InvalidMessage`] if the message does not end with
+    /// the required `\r\n.\r\n` terminator.
+    /// Returns a response error with code 440 if the server does not allow posting.
+    /// Returns a response error with code 441 if the server rejects the message content.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::NNTPStream;
+    ///
+    /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
+    ///     .expect("Failed to connect");
+    ///
+    /// let message = "From: user@example.com\r\n\
+    ///                  Newsgroups: comp.test\r\n\
+    ///                  Subject: Test post\r\n\
+    ///                  \r\n\
+    ///                  This is a test.\r\n\
+    ///                  .\r\n";
+    /// client.post(message).expect("Failed to post");
+    /// ```
     pub fn post(&mut self, message: &str) -> Result<()> {
         if !self.is_valid_message(message) {
             return Err(NNTPError::InvalidMessage {

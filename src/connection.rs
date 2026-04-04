@@ -1,3 +1,9 @@
+//! Connection utilities with automatic retry support.
+//!
+//! This module provides [`connect_with_retry`], which attempts to establish a
+//! TCP connection with exponential backoff on failure. It cycles through all
+//! resolved addresses for the given host and retries up to `max_retries` times.
+
 use core::net;
 use std::io;
 use std::net::TcpStream;
@@ -6,6 +12,22 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::vec::Vec;
 
+/// Connects to a server with automatic retry and exponential backoff.
+///
+/// Resolves the given address to socket addresses and attempts to connect
+/// with a timeout. On failure, retries up to `max_retries` times with
+/// exponential backoff (delay = `retry_delay_ms^attempt`).
+///
+/// # Arguments
+///
+/// * `addr` - The server address to connect to (e.g. `"host:port"`).
+/// * `max_retries` - Maximum number of retry attempts.
+/// * `retry_delay_ms` - Base delay in milliseconds for exponential backoff.
+/// * `timeout_secs` - Connection timeout in seconds per attempt.
+///
+/// # Errors
+///
+/// Returns the last I/O error encountered after all retries are exhausted.
 pub(crate) fn connect_with_retry(
     addr: &str,
     max_retries: usize,
