@@ -41,11 +41,12 @@ impl NNTPStream {
         Ok(socket)
     }
 
+    /// attempts to reconnect a failed connection
     pub fn re_connect(&mut self) -> Result<()> {
         let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
         self.stream = tcp_stream;
 
-        match self.read_response(vec![
+        let res = match self.read_response(vec![
             ResponseCode::ServiceAvailablePostingAllowed,
             ResponseCode::ServiceAvailablePostingProhibited,
         ]) {
@@ -131,46 +132,30 @@ impl NNTPStream {
 
     /// Gives the list of capabilities that the server has.
     pub fn capabilities(&mut self) -> Result<Vec<String>> {
-        let capabilities_command = "CAPABILITIES\r\n".to_string();
-
         self.send_command_expect_multiline_response(
-            &capabilities_command,
+            "CAPABILITIES\r\n",
             vec![ResponseCode::CapabilitiesListFollows],
         )
     }
 
     /// Retrieves the date as the server sees the date.
     pub fn date(&mut self) -> Result<String> {
-        let date_command = "DATE\r\n".to_string();
-
-        self.send_command_expect_response(&date_command, vec![ResponseCode::ServerDateTime])
+        self.send_command_expect_response("DATE\r\n", vec![ResponseCode::ServerDateTime])
     }
 
     /// Moves the currently selected article number forward one
     pub fn next_article(&mut self) -> Result<String> {
-        let next_command = "NEXT\r\n".to_string();
-
-        self.send_command_expect_response(
-            &next_command,
-            vec![ResponseCode::ArticleExistsAndSelected],
-        )
+        self.send_command_expect_response("NEXT\r\n", vec![ResponseCode::ArticleExistsAndSelected])
     }
 
     /// Moves the currently selected article number back one
     pub fn last(&mut self) -> Result<String> {
-        let last_command = "LAST\r\n".to_string();
-
-        self.send_command_expect_response(
-            &last_command,
-            vec![ResponseCode::ArticleExistsAndSelected],
-        )
+        self.send_command_expect_response("LAST\r\n", vec![ResponseCode::ArticleExistsAndSelected])
     }
 
     /// Lists all of the newgroups on the server.
     pub fn list(&mut self) -> Result<Vec<NewsGroup>> {
-        let list_command = "LIST\r\n".to_string();
-
-        match self.stream.write_fmt(format_args!("{}", list_command)) {
+        match self.stream.write_all(b"LIST\r\n") {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -184,7 +169,7 @@ impl NNTPStream {
             Ok(lines) => {
                 let lines: Vec<NewsGroup> = lines
                     .iter()
-                    .map(|ref mut x| NewsGroup::from_list_response(x))
+                    .map(|s| NewsGroup::from_list_response(s))
                     .collect();
                 Ok(lines)
             }
@@ -196,10 +181,10 @@ impl NNTPStream {
     pub fn group(&mut self, group: &str) -> Result<NewsGroup> {
         let group_command = format!("GROUP {}\r\n", group);
 
-        match self.stream.write_fmt(format_args!("{}", group_command)) {
+        match self.stream.write_all(group_command.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
-        };
+        }
 
         match self.read_response(vec![ResponseCode::ArticleNumbersFollows]) {
             Ok((_, res)) => Ok(NewsGroup::from_group_response(&res)),
@@ -209,12 +194,7 @@ impl NNTPStream {
 
     /// Show the help command given on the server.
     pub fn help(&mut self) -> Result<Vec<String>> {
-        let help_command = "HELP\r\n".to_string();
-
-        self.send_command_expect_multiline_response(
-            &help_command,
-            vec![ResponseCode::HelpTextFollows],
-        )
+        self.send_command_expect_multiline_response("HELP\r\n", vec![ResponseCode::HelpTextFollows])
     }
 
     /// Retrieves a list of newsgroups since the date and time given.
@@ -251,8 +231,7 @@ impl NNTPStream {
 
     /// Quits the current session.
     pub fn quit(&mut self) -> Result<()> {
-        let quit_command = "QUIT\r\n".to_string();
-        match self.stream.write_fmt(format_args!("{}", quit_command)) {
+        match self.stream.write_all(b"QUIT\r\n") {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -275,9 +254,7 @@ impl NNTPStream {
             });
         }
 
-        let post_command = "POST\r\n".to_string();
-
-        match self.stream.write_fmt(format_args!("{}", post_command)) {
+        match self.stream.write_all(b"POST\r\n") {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -285,9 +262,9 @@ impl NNTPStream {
         match self.read_response(vec![ResponseCode::SendArticleToPost]) {
             Ok(_) => (),
             Err(e) => return Err(e),
-        };
+        }
 
-        match self.stream.write_fmt(format_args!("{}", message)) {
+        match self.stream.write_all(message.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -306,7 +283,7 @@ impl NNTPStream {
         command: &str,
         expected_code: Vec<codes::ResponseCode>,
     ) -> Result<String> {
-        match self.stream.write_fmt(format_args!("{}", command)) {
+        match self.stream.write_all(command.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -322,7 +299,7 @@ impl NNTPStream {
         command: &str,
         expected_code: Vec<codes::ResponseCode>,
     ) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", command)) {
+        match self.stream.write_all(command.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
@@ -330,13 +307,13 @@ impl NNTPStream {
         match self.read_response(expected_code) {
             Ok(_) => (),
             Err(e) => return Err(e),
-        };
+        }
 
         self.read_multiline_response()
     }
 
     fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
-        match self.stream.write_fmt(format_args!("{}", article_command)) {
+        match self.stream.write_all(article_command.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::article_error_or_network(error)),
         }
@@ -360,7 +337,7 @@ impl NNTPStream {
     }
 
     fn retrieve_raw_article(&mut self, article_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", article_command)) {
+        match self.stream.write_all(article_command.as_bytes()) {
             Ok(_) => (),
             Err(error) => return Err(errors::article_error_or_network(error)),
         }
@@ -404,16 +381,15 @@ impl NNTPStream {
         )
     }
 
-    fn is_valid_message(&mut self, message: &str) -> bool {
+    fn is_valid_message(&self, message: &str) -> bool {
         //Carriage return
         let cr = 0x0d;
         //Line Feed
         let lf = 0x0a;
         //Dot
         let dot = 0x2e;
-        let message_string = message.to_string();
-        let message_bytes = message_string.as_bytes();
-        let length = message_string.len();
+        let message_bytes = message.as_bytes();
+        let length = message_bytes.len();
 
         length >= 5
             && (message_bytes[length - 1] == lf
