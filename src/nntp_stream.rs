@@ -13,6 +13,9 @@ use crate::newsgroup::NewsGroup;
 pub struct NNTPStream {
     server_address: String,
     stream: TcpStream,
+    authenticated: bool,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 /// connection calls
@@ -23,6 +26,9 @@ impl NNTPStream {
         let mut socket = NNTPStream {
             stream: tcp_stream,
             server_address: addr,
+            authenticated: false,
+            username: None,
+            password: None,
         };
 
         match socket.read_response(vec![
@@ -44,6 +50,7 @@ impl NNTPStream {
     /// attempts to reconnect a failed connection
     pub fn re_connect(&mut self) -> Result<()> {
         let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
+
         self.stream = tcp_stream;
 
         let res = match self.read_response(vec![
@@ -58,7 +65,46 @@ impl NNTPStream {
                 expected: "greeting response".to_owned(),
                 error: Box::new(err),
             }),
+        };
+
+        // if the server was authenticated, re-auth after reconnection
+        if self.authenticated {
+            self.authenticated = false;
+            if let (Some(username), Some(password)) = (self.username.clone(), self.password.clone())
+                && let Err(e) = self.user_password_authenticate(&username, &password)
+            {
+                log::warn!("Re-authentication after reconnect failed: {}", e);
+                return Err(e);
+            }
         }
+
+        res
+    }
+
+    /// Authenticate using USER/PASS method.
+    /// Stores credentials for use during reconnection.
+    /// some server might require set_mode request: [`set_mode`, `set_mode_reader``,
+    /// `set_mode_poster`]
+    pub fn user_password_authenticate(&mut self, username: &str, password: &str) -> Result<()> {
+        // TODO: allow posting mode too
+
+        let user_response = self.auth_user(username)?;
+
+        // If the server already accepted authentication with USER alone, skip PASS
+        if user_response.starts_with("281") {
+            self.authenticated = true;
+            self.username = Some(username.to_owned());
+            self.password = Some(password.to_owned());
+            return Ok(());
+        }
+
+        // Server responded with 381 (Password Required), send PASS
+        self.auth_password(password)?;
+
+        self.authenticated = true;
+        self.username = Some(username.to_owned());
+        self.password = Some(password.to_owned());
+        Ok(())
     }
 }
 
@@ -241,6 +287,65 @@ impl NNTPStream {
             Err(e) => Err(e),
         }
     }
+
+    /// send MODE command to server
+    /// - READER
+    /// - POSTER
+    pub fn set_mode(&mut self, mode: &str) -> Result<String> {
+        let mode_upper = mode.to_uppercase();
+        self.send_command_expect_response(
+            &format!("MODE {}\r\n", mode_upper),
+            vec![
+                ResponseCode::ServiceAvailablePostingAllowed,
+                ResponseCode::ServiceAvailablePostingProhibited,
+            ],
+        )
+    }
+
+    /// send MODE command to server
+    /// - READER
+    pub fn set_mode_reader(&mut self) -> Result<String> {
+        self.send_command_expect_response(
+            "MODE READER\r\n",
+            vec![
+                ResponseCode::ServiceAvailablePostingAllowed,
+                ResponseCode::ServiceAvailablePostingProhibited,
+            ],
+        )
+    }
+
+    /// send MODE command to server
+    /// - POSTER
+    pub fn set_mode_poster(&mut self) -> Result<String> {
+        self.send_command_expect_response(
+            "MODE POSTER\r\n",
+            vec![ResponseCode::ServiceAvailablePostingAllowed],
+        )
+    }
+}
+
+/// RFC4643 Network News Transfer Protocol (NNTP) Extension for Authentication
+impl NNTPStream {
+    /// auth_user sends the username command to the server
+    fn auth_user(&mut self, username: &str) -> Result<String> {
+        self.send_command_expect_response(
+            &format!("AUTHINFO USER {}\r\n", username),
+            vec![
+                ResponseCode::AuthenticationAccepted,
+                ResponseCode::PasswordRequired,
+            ],
+        )
+    }
+
+    /// auth_password sends the password command to the server
+    fn auth_password(&mut self, password: &str) -> Result<String> {
+        self.send_command_expect_response(
+            &format!("AUTHINFO PASS {}\r\n", password),
+            vec![ResponseCode::AuthenticationAccepted],
+        )
+    }
+
+    // TODO: implement SASL ?
 }
 
 /// write commands
