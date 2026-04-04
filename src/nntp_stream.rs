@@ -15,6 +15,7 @@ pub struct NNTPStream {
     stream: TcpStream,
 }
 
+/// connection calls
 impl NNTPStream {
     /// Creates an NNTP Stream.
     pub fn connect(addr: String) -> Result<NNTPStream> {
@@ -58,7 +59,10 @@ impl NNTPStream {
             }),
         }
     }
+}
 
+/// commands
+impl NNTPStream {
     /// The article indicated by the current article number in the currently selected newsgroup is selected.
     pub fn article(&mut self) -> Result<Article> {
         self.retrieve_article("ARTICLE\r\n")
@@ -80,54 +84,6 @@ impl NNTPStream {
         self.retrieve_raw_article(&format!("ARTICLE {}\r\n", article_number))
     }
 
-    fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
-        match self.stream.write_fmt(format_args!("{}", article_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::article_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleFollows]) {
-            Ok(_) => (),
-            Err(e) => match e {
-                // TODO: replace by status code evaluation
-                NNTPError::ResponseCode {
-                    expected: _,
-                    received: 423,
-                } => return Err(errors::NNTPError::ArticleUnavailable),
-                _ => return Err(e),
-            },
-        }
-
-        match self.read_multiline_response() {
-            Ok(lines) => Ok(Article::new_article(lines)),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn retrieve_raw_article(&mut self, article_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", article_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::article_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleFollows]) {
-            Ok(_) => (),
-            Err(e) => match e {
-                // TODO: replace by status code evaluation
-                NNTPError::ResponseCode {
-                    expected: _,
-                    received: 423,
-                } => return Err(errors::NNTPError::ArticleUnavailable),
-                _ => return Err(e),
-            },
-        }
-
-        match self.read_multiline_response() {
-            Ok(lines) => Ok(lines),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Retrieves the body of the current article number in the currently selected newsgroup.
     pub fn body(&mut self) -> Result<Vec<String>> {
         self.retrieve_body("BODY\r\n")
@@ -143,18 +99,34 @@ impl NNTPStream {
         self.retrieve_body(&format!("BODY {}\r\n", article_number))
     }
 
-    fn retrieve_body(&mut self, body_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", body_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
+    /// Gets information about the current article.
+    pub fn stat(&mut self) -> Result<String> {
+        self.retrieve_stat("STAT\r\n")
+    }
 
-        match self.read_response(vec![ResponseCode::ArticleBodyFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
+    /// Gets the information about the article id.
+    pub fn stat_by_id(&mut self, article_id: &str) -> Result<String> {
+        self.retrieve_stat(&format!("STAT {}\r\n", article_id))
+    }
 
-        self.read_multiline_response()
+    /// Gets the information about the article number.
+    pub fn stat_by_number(&mut self, article_number: isize) -> Result<String> {
+        self.retrieve_stat(&format!("STAT {}\r\n", article_number))
+    }
+
+    /// Retrieves the headers of the current article number in the currently selected newsgroup.
+    pub fn head(&mut self) -> Result<Vec<String>> {
+        self.retrieve_head("HEAD\r\n")
+    }
+
+    /// Retrieves the headers of the article id.
+    pub fn head_by_id(&mut self, article_id: &str) -> Result<Vec<String>> {
+        self.retrieve_head(&format!("HEAD {}\r\n", article_id))
+    }
+
+    /// Retrieves the headers of the article number in the currently selected newsgroup.
+    pub fn head_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
+        self.retrieve_head(&format!("HEAD {}\r\n", article_number))
     }
 
     /// Gives the list of capabilities that the server has.
@@ -192,33 +164,18 @@ impl NNTPStream {
         }
     }
 
-    /// Retrieves the headers of the current article number in the currently selected newsgroup.
-    pub fn head(&mut self) -> Result<Vec<String>> {
-        self.retrieve_head("HEAD\r\n")
-    }
-
-    /// Retrieves the headers of the article id.
-    pub fn head_by_id(&mut self, article_id: &str) -> Result<Vec<String>> {
-        self.retrieve_head(&format!("HEAD {}\r\n", article_id))
-    }
-
-    /// Retrieves the headers of the article number in the currently selected newsgroup.
-    pub fn head_by_number(&mut self, article_number: isize) -> Result<Vec<String>> {
-        self.retrieve_head(&format!("HEAD {}\r\n", article_number))
-    }
-
-    fn retrieve_head(&mut self, head_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", head_command)) {
+    /// Moves the currently selected article number forward one
+    pub fn next_article(&mut self) -> Result<String> {
+        let next_command = "NEXT\r\n".to_string();
+        match self.stream.write_fmt(format_args!("{}", next_command)) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(vec![ResponseCode::ArticleHeadersFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
+        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
+            Ok((_, message)) => Ok(message),
+            Err(e) => Err(e),
         }
-
-        self.read_multiline_response()
     }
 
     /// Moves the currently selected article number back one
@@ -294,20 +251,6 @@ impl NNTPStream {
         self.read_multiline_response()
     }
 
-    /// Quits the current session.
-    pub fn quit(&mut self) -> Result<()> {
-        let quit_command = "QUIT\r\n".to_string();
-        match self.stream.write_fmt(format_args!("{}", quit_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ConnectionClosing]) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Retrieves a list of newsgroups since the date and time given.
     pub fn newgroups(&mut self, date: &str, time: &str, use_gmt: bool) -> Result<Vec<String>> {
         let newgroups_command = match use_gmt {
@@ -354,20 +297,23 @@ impl NNTPStream {
         self.read_multiline_response()
     }
 
-    /// Moves the currently selected article number forward one
-    pub fn next_article(&mut self) -> Result<String> {
-        let next_command = "NEXT\r\n".to_string();
-        match self.stream.write_fmt(format_args!("{}", next_command)) {
+    /// Quits the current session.
+    pub fn quit(&mut self) -> Result<()> {
+        let quit_command = "QUIT\r\n".to_string();
+        match self.stream.write_fmt(format_args!("{}", quit_command)) {
             Ok(_) => (),
             Err(error) => return Err(errors::write_error_or_network(error)),
         }
 
-        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
-            Ok((_, message)) => Ok(message),
+        match self.read_response(vec![ResponseCode::ConnectionClosing]) {
+            Ok(_) => Ok(()),
             Err(e) => Err(e),
         }
     }
+}
 
+/// write commands
+impl NNTPStream {
     /// Posts a message to the NNTP server.
     pub fn post(&mut self, message: &str) -> Result<()> {
         if !self.is_valid_message(message) {
@@ -399,20 +345,84 @@ impl NNTPStream {
             Err(e) => Err(e),
         }
     }
+}
 
-    /// Gets information about the current article.
-    pub fn stat(&mut self) -> Result<String> {
-        self.retrieve_stat("STAT\r\n")
+/// base protocol handling helpers
+impl NNTPStream {
+    fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
+        match self.stream.write_fmt(format_args!("{}", article_command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::article_error_or_network(error)),
+        }
+
+        match self.read_response(vec![ResponseCode::ArticleFollows]) {
+            Ok(_) => (),
+            Err(e) => match e {
+                // TODO: replace by status code evaluation
+                NNTPError::ResponseCode {
+                    expected: _,
+                    received: 423,
+                } => return Err(errors::NNTPError::ArticleUnavailable),
+                _ => return Err(e),
+            },
+        }
+
+        match self.read_multiline_response() {
+            Ok(lines) => Ok(Article::new_article(lines)),
+            Err(e) => Err(e),
+        }
     }
 
-    /// Gets the information about the article id.
-    pub fn stat_by_id(&mut self, article_id: &str) -> Result<String> {
-        self.retrieve_stat(&format!("STAT {}\r\n", article_id))
+    fn retrieve_raw_article(&mut self, article_command: &str) -> Result<Vec<String>> {
+        match self.stream.write_fmt(format_args!("{}", article_command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::article_error_or_network(error)),
+        }
+
+        match self.read_response(vec![ResponseCode::ArticleFollows]) {
+            Ok(_) => (),
+            Err(e) => match e {
+                // TODO: replace by status code evaluation
+                NNTPError::ResponseCode {
+                    expected: _,
+                    received: 423,
+                } => return Err(errors::NNTPError::ArticleUnavailable),
+                _ => return Err(e),
+            },
+        }
+
+        match self.read_multiline_response() {
+            Ok(lines) => Ok(lines),
+            Err(e) => Err(e),
+        }
     }
 
-    /// Gets the information about the article number.
-    pub fn stat_by_number(&mut self, article_number: isize) -> Result<String> {
-        self.retrieve_stat(&format!("STAT {}\r\n", article_number))
+    fn retrieve_body(&mut self, body_command: &str) -> Result<Vec<String>> {
+        match self.stream.write_fmt(format_args!("{}", body_command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::write_error_or_network(error)),
+        }
+
+        match self.read_response(vec![ResponseCode::ArticleBodyFollows]) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+
+        self.read_multiline_response()
+    }
+
+    fn retrieve_head(&mut self, head_command: &str) -> Result<Vec<String>> {
+        match self.stream.write_fmt(format_args!("{}", head_command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::write_error_or_network(error)),
+        }
+
+        match self.read_response(vec![ResponseCode::ArticleHeadersFollows]) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        }
+
+        self.read_multiline_response()
     }
 
     fn retrieve_stat(&mut self, stat_command: &str) -> Result<String> {
