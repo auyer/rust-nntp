@@ -133,64 +133,37 @@ impl NNTPStream {
     pub fn capabilities(&mut self) -> Result<Vec<String>> {
         let capabilities_command = "CAPABILITIES\r\n".to_string();
 
-        match self
-            .stream
-            .write_fmt(format_args!("{}", capabilities_command))
-        {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::CapabilitiesListFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            &capabilities_command,
+            vec![ResponseCode::CapabilitiesListFollows],
+        )
     }
 
     /// Retrieves the date as the server sees the date.
     pub fn date(&mut self) -> Result<String> {
         let date_command = "DATE\r\n".to_string();
 
-        match self.stream.write_fmt(format_args!("{}", date_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ServerDateTime]) {
-            Ok((_, message)) => Ok(message),
-            Err(e) => Err(e),
-        }
+        self.send_command_expect_response(&date_command, vec![ResponseCode::ServerDateTime])
     }
 
     /// Moves the currently selected article number forward one
     pub fn next_article(&mut self) -> Result<String> {
         let next_command = "NEXT\r\n".to_string();
-        match self.stream.write_fmt(format_args!("{}", next_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
 
-        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
-            Ok((_, message)) => Ok(message),
-            Err(e) => Err(e),
-        }
+        self.send_command_expect_response(
+            &next_command,
+            vec![ResponseCode::ArticleExistsAndSelected],
+        )
     }
 
     /// Moves the currently selected article number back one
     pub fn last(&mut self) -> Result<String> {
         let last_command = "LAST\r\n".to_string();
 
-        match self.stream.write_fmt(format_args!("{}", last_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
-            Ok((_, message)) => Ok(message),
-            Err(e) => Err(e),
-        }
+        self.send_command_expect_response(
+            &last_command,
+            vec![ResponseCode::ArticleExistsAndSelected],
+        )
     }
 
     /// Lists all of the newgroups on the server.
@@ -238,17 +211,10 @@ impl NNTPStream {
     pub fn help(&mut self) -> Result<Vec<String>> {
         let help_command = "HELP\r\n".to_string();
 
-        match self.stream.write_fmt(format_args!("{}", help_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::HelpTextFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            &help_command,
+            vec![ResponseCode::HelpTextFollows],
+        )
     }
 
     /// Retrieves a list of newsgroups since the date and time given.
@@ -258,17 +224,10 @@ impl NNTPStream {
             false => format!("NEWSGROUP {} {}\r\n", date, time),
         };
 
-        match self.stream.write_fmt(format_args!("{}", newgroups_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ListOfNewNewsgroupsFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            &newgroups_command,
+            vec![ResponseCode::ListOfNewNewsgroupsFollows],
+        )
     }
 
     /// Retrieves a list of new news since the date and time given.
@@ -284,17 +243,10 @@ impl NNTPStream {
             false => format!("NEWNEWS {} {} {}\r\n", wildmat, date, time),
         };
 
-        match self.stream.write_fmt(format_args!("{}", newnews_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ListOfNewArticlesFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            &newnews_command,
+            vec![ResponseCode::ListOfNewArticlesFollows],
+        )
     }
 
     /// Quits the current session.
@@ -349,6 +301,40 @@ impl NNTPStream {
 
 /// base protocol handling helpers
 impl NNTPStream {
+    fn send_command_expect_response(
+        &mut self,
+        command: &str,
+        expected_code: Vec<codes::ResponseCode>,
+    ) -> Result<String> {
+        match self.stream.write_fmt(format_args!("{}", command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::write_error_or_network(error)),
+        }
+
+        match self.read_response(expected_code) {
+            Ok((_, message)) => Ok(message),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn send_command_expect_multiline_response(
+        &mut self,
+        command: &str,
+        expected_code: Vec<codes::ResponseCode>,
+    ) -> Result<Vec<String>> {
+        match self.stream.write_fmt(format_args!("{}", command)) {
+            Ok(_) => (),
+            Err(error) => return Err(errors::write_error_or_network(error)),
+        }
+
+        match self.read_response(expected_code) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        };
+
+        self.read_multiline_response()
+    }
+
     fn retrieve_article(&mut self, article_command: &str) -> Result<Article> {
         match self.stream.write_fmt(format_args!("{}", article_command)) {
             Ok(_) => (),
@@ -398,43 +384,24 @@ impl NNTPStream {
     }
 
     fn retrieve_body(&mut self, body_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", body_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleBodyFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            body_command,
+            vec![ResponseCode::ArticleBodyFollows],
+        )
     }
 
     fn retrieve_head(&mut self, head_command: &str) -> Result<Vec<String>> {
-        match self.stream.write_fmt(format_args!("{}", head_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleHeadersFollows]) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        }
-
-        self.read_multiline_response()
+        self.send_command_expect_multiline_response(
+            head_command,
+            vec![ResponseCode::ArticleHeadersFollows],
+        )
     }
 
     fn retrieve_stat(&mut self, stat_command: &str) -> Result<String> {
-        match self.stream.write_fmt(format_args!("{}", stat_command)) {
-            Ok(_) => (),
-            Err(error) => return Err(errors::write_error_or_network(error)),
-        }
-
-        match self.read_response(vec![ResponseCode::ArticleExistsAndSelected]) {
-            Ok((_, message)) => Ok(message),
-            Err(e) => Err(e),
-        }
+        self.send_command_expect_response(
+            stat_command,
+            vec![ResponseCode::ArticleExistsAndSelected],
+        )
     }
 
     fn is_valid_message(&mut self, message: &str) -> bool {
