@@ -9,10 +9,6 @@ description = "NNTP client for Rust"
 license = "GPL-V3"
 readme = "README.md"
 
-[lib]
-name = "nntp"
-path = "src/nntp.rs"
-
 [dependencies]
 encoding_rs = "0.8.35"
 strum = { version = "0.28", features = ["derive"] }
