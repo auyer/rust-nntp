@@ -3,30 +3,81 @@ use std::net::TcpStream;
 use std::string::String;
 use std::vec::Vec;
 
+use rustls::{ClientConnection, StreamOwned};
+
+use crate::address::ServerAddress;
 use crate::article::Article;
 use crate::codes::{self, ResponseCode};
 use crate::connection::connect_with_retry;
 use crate::errors::{self, NNTPError, Result};
 use crate::newsgroup::NewsGroup;
+use crate::tls::wrap_tls;
+
+/// The underlying stream type — either plain TCP or TLS-wrapped.
+enum InnerStream {
+    Plain(TcpStream),
+    Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
+}
+
+impl Read for InnerStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            InnerStream::Plain(s) => s.read(buf),
+            InnerStream::Tls(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for InnerStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            InnerStream::Plain(s) => s.write(buf),
+            InnerStream::Tls(s) => s.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            InnerStream::Plain(s) => s.flush(),
+            InnerStream::Tls(s) => s.flush(),
+        }
+    }
+}
 
 /// A connection to an NNTP server.
 ///
-/// `NNTPStream` wraps a TCP connection and provides methods for sending NNTP
-/// commands and parsing responses. It handles encoding detection (UTF-8 and
-/// WINDOWS-1252), automatic reconnection with retry, and optional authentication.
+/// `NNTPStream` wraps a TCP connection (optionally TLS-encrypted) and provides
+/// methods for sending NNTP commands and parsing responses. It handles encoding
+/// detection (UTF-8 and WINDOWS-1252), automatic reconnection with retry, and
+/// optional authentication.
+///
+/// # TLS Support
+///
+/// TLS is automatically enabled when:
+/// - The address uses the `nntps://` scheme
+/// - The port is 563 (the standard NNTPS port)
+///
+/// For explicit TLS control, use [`NNTPStream::connect_with`] with a
+/// [`ServerAddress`] configured via [`ServerAddress::with_tls`].
 ///
 /// # Example
 ///
 /// ```no_run
 /// use nntp::NNTPStream;
 ///
+/// // Plain connection on port 119
 /// let mut client = NNTPStream::connect("nntp.example.com:119".to_string())
 ///     .expect("Failed to connect");
+///
+/// // TLS connection on port 563 (auto-enabled)
+/// let mut client_tls = NNTPStream::connect("nntp.example.com:563".to_string())
+///     .expect("Failed to connect");
+///
 /// let _ = client.quit();
 /// ```
 pub struct NNTPStream {
-    server_address: String,
-    stream: TcpStream,
+    server_addr: ServerAddress,
+    stream: InnerStream,
     authenticated: bool,
     username: Option<String>,
     password: Option<String>,
@@ -36,7 +87,13 @@ pub struct NNTPStream {
 impl NNTPStream {
     /// Connects to an NNTP server at the given address.
     ///
-    /// The address should be in the format `"host:port"` (e.g. `"nntp.example.com:119"`).
+    /// The address can be in several formats:
+    /// - `"host:port"` — TLS auto-enabled if port is 563
+    /// - `"nntp://host"` — plain connection on port 119
+    /// - `"nntp://host:port"` — plain connection on specified port
+    /// - `"nntps://host"` — TLS connection on port 563
+    /// - `"nntps://host:port"` — TLS connection on specified port
+    ///
     /// The connection attempt uses exponential backoff with up to 3 retries.
     ///
     /// On successful connection, the server's greeting response (code 200 or 201)
@@ -46,6 +103,7 @@ impl NNTPStream {
     ///
     /// Returns [`NNTPError::FailedConnecting`] if the connection fails or the
     /// server greeting is not recognized.
+    /// Returns [`NNTPError::TlsError`] if the TLS handshake fails.
     ///
     /// # Example
     ///
@@ -56,10 +114,57 @@ impl NNTPStream {
     ///     .expect("Failed to connect");
     /// ```
     pub fn connect(addr: String) -> Result<NNTPStream> {
-        let tcp_stream = connect_with_retry(&addr, 3, 7_0000, 100)?;
+        let server_addr = ServerAddress::parse(&addr).map_err(|e| NNTPError::FailedConnecting {
+            expected: "valid address".to_owned(),
+            error: Box::new(NNTPError::TlsError {
+                message: e.to_string(),
+            }),
+        })?;
+        Self::establish_connection(server_addr)
+    }
+
+    /// Connects to an NNTP server using an explicit [`ServerAddress`].
+    ///
+    /// This method gives full control over TLS configuration.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use nntp::{NNTPStream, ServerAddress, TlsConfig};
+    ///
+    /// // Connect with TLS, skipping certificate validation (DANGEROUS)
+    /// let addr = ServerAddress::with_tls(
+    ///     "nntp.example.com",
+    ///     563,
+    ///     TlsConfig { danger_accept_invalid_certs: true },
+    /// );
+    /// let client = NNTPStream::connect_with(addr);
+    /// ```
+    pub fn connect_with(server_addr: ServerAddress) -> Result<NNTPStream> {
+        Self::establish_connection(server_addr)
+    }
+
+    /// Internal: establishes TCP connection and optional TLS handshake
+    fn establish_connection(server_addr: ServerAddress) -> Result<NNTPStream> {
+        let addr_str = format!("{}:{}", server_addr.host, server_addr.port);
+        let tcp_stream = connect_with_retry(&addr_str, 3, 7_0000, 100)?;
+
+        let stream = if server_addr.tls.is_some() {
+            let tls_stream =
+                wrap_tls(tcp_stream, &server_addr).map_err(|e| NNTPError::FailedConnecting {
+                    expected: "TLS handshake".to_owned(),
+                    error: Box::new(NNTPError::TlsError {
+                        message: e.to_string(),
+                    }),
+                })?;
+            InnerStream::Tls(Box::new(tls_stream))
+        } else {
+            InnerStream::Plain(tcp_stream)
+        };
+
         let mut socket = NNTPStream {
-            stream: tcp_stream,
-            server_address: addr,
+            stream,
+            server_addr,
             authenticated: false,
             username: None,
             password: None,
@@ -81,7 +186,7 @@ impl NNTPStream {
         Ok(socket)
     }
 
-    /// Reconnects to the server using the same address.
+    /// Reconnects to the server using the same address and TLS configuration.
     ///
     /// This is useful after a connection has been lost. If the stream was
     /// previously authenticated, this method will automatically re-authenticate
@@ -92,9 +197,22 @@ impl NNTPStream {
     /// Returns [`NNTPError::FailedConnecting`] if reconnection fails, or
     /// propagates authentication errors from [`NNTPStream::user_password_authenticate`].
     pub fn re_connect(&mut self) -> Result<()> {
-        let tcp_stream = connect_with_retry(&self.server_address, 3, 7_000, 100)?;
+        let addr_str = format!("{}:{}", self.server_addr.host, self.server_addr.port);
+        let tcp_stream = connect_with_retry(&addr_str, 3, 7_000, 100)?;
 
-        self.stream = tcp_stream;
+        self.stream = if self.server_addr.tls.is_some() {
+            let tls_stream = wrap_tls(tcp_stream, &self.server_addr).map_err(|e| {
+                NNTPError::FailedConnecting {
+                    expected: "TLS handshake".to_owned(),
+                    error: Box::new(NNTPError::TlsError {
+                        message: e.to_string(),
+                    }),
+                }
+            })?;
+            InnerStream::Tls(Box::new(tls_stream))
+        } else {
+            InnerStream::Plain(tcp_stream)
+        };
 
         let res = match self.read_response(vec![
             ResponseCode::ServiceAvailablePostingAllowed,

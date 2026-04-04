@@ -54,6 +54,9 @@ pub enum NNTPError {
         expected: Vec<ResponseCode>,
         received: isize,
     },
+
+    #[error("TLS error: {message}")]
+    TlsError { message: String },
 }
 
 /// Checks whether the given error represents a network-level error

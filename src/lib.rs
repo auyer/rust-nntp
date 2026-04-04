@@ -7,6 +7,7 @@
 //! ## Features
 //!
 //! - Connect to NNTP servers with automatic retry and exponential backoff
+//! - TLS encryption (auto-enabled on port 563 or `nntps://` scheme)
 //! - Retrieve articles by number or message ID
 //! - Fetch article headers, body, or full content
 //! - List and select newsgroups
@@ -41,16 +42,20 @@
 //! let _ = client.quit();
 //! ```
 
+pub mod address;
 pub mod article;
 pub mod codes;
 mod connection;
 pub mod errors;
 pub mod newsgroup;
 pub mod nntp_stream;
+pub mod tls;
 
 // re-export type for ease of use
+pub use address::ServerAddress;
 pub use article::Article;
 pub use codes::ResponseCode;
 pub use errors::{NNTPError, Result};
 pub use newsgroup::NewsGroup;
 pub use nntp_stream::NNTPStream;
+pub use tls::TlsConfig;
