@@ -51,8 +51,7 @@ pub(crate) fn build_client_config(tls_config: &TlsConfig) -> Result<ClientConfig
 }
 
 /// TLS configuration for an NNTP connection.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TlsConfig {
     /// Skip server certificate validation.
     ///
@@ -60,7 +59,6 @@ pub struct TlsConfig {
     /// attacks. Only use for testing or when you understand the risks.
     pub danger_accept_invalid_certs: bool,
 }
-
 
 /// Builds a dangerous ClientConfig that skips certificate validation.
 fn build_dangerous_config() -> Result<ClientConfig, std::io::Error> {
