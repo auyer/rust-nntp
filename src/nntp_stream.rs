@@ -14,6 +14,7 @@ use crate::newsgroup::NewsGroup;
 use crate::tls::wrap_tls;
 
 /// The underlying stream type — either plain TCP or TLS-wrapped.
+#[derive(Debug)]
 enum InnerStream {
     Plain(TcpStream),
     Tls(Box<StreamOwned<ClientConnection, TcpStream>>),
@@ -75,6 +76,7 @@ impl Write for InnerStream {
 ///
 /// let _ = client.quit();
 /// ```
+#[derive(Debug)]
 pub struct NNTPStream {
     server_addr: ServerAddress,
     stream: InnerStream,
