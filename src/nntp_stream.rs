@@ -149,7 +149,7 @@ impl NNTPStream {
     /// Internal: establishes TCP connection and optional TLS handshake
     fn establish_connection(server_addr: ServerAddress) -> Result<NNTPStream> {
         let addr_str = format!("{}:{}", server_addr.host, server_addr.port);
-        let tcp_stream = connect_with_retry(&addr_str, 3, 7_0000, 100)?;
+        let tcp_stream = connect_with_retry(&addr_str, 3, 500, 30)?;
 
         let stream = if server_addr.tls.is_some() {
             let tls_stream =
@@ -200,7 +200,7 @@ impl NNTPStream {
     /// propagates authentication errors from [`NNTPStream::user_password_authenticate`].
     pub fn re_connect(&mut self) -> Result<()> {
         let addr_str = format!("{}:{}", self.server_addr.host, self.server_addr.port);
-        let tcp_stream = connect_with_retry(&addr_str, 3, 7_000, 100)?;
+        let tcp_stream = connect_with_retry(&addr_str, 3, 500, 30)?;
 
         self.stream = if self.server_addr.tls.is_some() {
             let tls_stream = wrap_tls(tcp_stream, &self.server_addr).map_err(|e| {

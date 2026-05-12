@@ -85,8 +85,9 @@ pub(crate) fn connect_with_retry(
 
                 // If we still have attempts left, sleep before the next one
                 if attempts < max_retries {
-                    // exponential backoff
-                    let delay_ms = (retry_delay_ms.pow(attempts as u32)) as u64;
+                    // exponential backoff: base * 2^(attempts-1)
+                    let delay_ms =
+                        retry_delay_ms as u64 * 2u64.pow(attempts.saturating_sub(1) as u32);
                     log::warn!("Retrying in {}ms...", delay_ms);
                     sleep(Duration::from_millis(delay_ms));
                 }
