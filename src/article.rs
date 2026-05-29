@@ -44,9 +44,11 @@ impl Article {
     ///
     /// * `lines` - Raw article lines as returned by the server, including `\r\n` terminators.
     pub fn new_article(lines: Vec<String>) -> Article {
-        let mut headers = HashMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         let mut body = Vec::new();
         let mut parsing_headers = true;
+        let mut last_key: Option<String> = None;
+        let chars_to_trim: &[char] = &['\r', '\n'];
 
         for i in lines.iter() {
             if i == &"\r\n".to_string() {
@@ -54,19 +56,25 @@ impl Article {
                 continue;
             }
             if parsing_headers {
-                let mut header = i.splitn(2, ':');
-                let chars_to_trim: &[char] = &['\r', '\n'];
-                let key = header
-                    .nth(0)
-                    .unwrap()
-                    .trim_matches(chars_to_trim)
-                    .to_string();
-                let value = header
-                    .nth(0)
-                    .unwrap()
-                    .trim_matches(chars_to_trim)
-                    .to_string();
-                headers.insert(key, value);
+                let trimmed = i.trim_matches(chars_to_trim);
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(ref key) = last_key {
+                    if trimmed.starts_with(' ') || trimmed.starts_with('\t') {
+                        if let Some(existing) = headers.get_mut(key) {
+                            existing.push('\n');
+                            existing.push_str(trimmed);
+                        }
+                        continue;
+                    }
+                }
+                if let Some((key, value)) = i.split_once(':') {
+                    let key = key.trim_matches(chars_to_trim).to_string();
+                    let value = value.trim_matches(chars_to_trim).to_string();
+                    last_key = Some(key.clone());
+                    headers.insert(key, value);
+                }
             } else {
                 body.push(i.clone());
             }
